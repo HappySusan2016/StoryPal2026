@@ -1,0 +1,29 @@
+{
+  "name": "story-pal",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev --webpack",
+    "build": "next build --webpack",
+    "start": "next start",
+    "lint": "eslint"
+  },
+  "dependencies": {
+    "@fortawesome/fontawesome-svg-core": "^7.1.0",
+    "@fortawesome/free-solid-svg-icons": "^7.1.0",
+    "@fortawesome/react-fontawesome": "^3.1.1",
+    "@google/generative-ai": "^0.24.1",
+    "baseline-browser-mapping": "^2.8.32",
+    "firebase": "^12.6.0",
+    "lucide-react": "^0.555.0",
+    "next": "^16.0.10",
+    "react": "19.2.0",
+    "react-dom": "19.2.0"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "^4",
+    "eslint": "^9",
+    "eslint-config-next": "^16.0.10",
+    "tailwindcss": "^4"
+  }
+}

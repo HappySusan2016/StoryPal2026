@@ -1,0 +1,131 @@
+@import "tailwindcss";
+
+:root {
+  --background: #f1f5f9;
+  --foreground: #171717;
+}
+
+/* Increase base font size for improved readability */
+html {
+  font-size: 18px;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+}
+
+/* App-wide font variable with defaults and runtime switching */
+:root {
+  --app-font: var(--font-epilogue);
+}
+html[data-ui-font="classic"] {
+  --app-font: var(--font-epilogue);
+}
+html[data-ui-font="hand"] {
+  --app-font: var(--font-shadows-into-light);
+}
+html[data-ui-font="playful"] {
+  --app-font: var(--font-slackey);
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  line-height: 1.65;
+  font-weight: 400; /* normal weight for body text */
+  letter-spacing: 0.01em;
+}
+
+/* Headings inherit app font with progressive weights */
+h1 {
+  font-family: var(--app-font) !important;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+}
+
+h2 {
+  font-family: var(--app-font) !important;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+
+h3 {
+  font-weight: 600;
+  letter-spacing: 0;
+}
+
+/* Story player fonts are set via inline styles, no global override needed */
+
+h4,
+h5,
+h6 {
+  font-family: var(--app-font) !important;
+  font-weight: 600;
+  letter-spacing: 0;
+}
+
+/* All elements inherit app font */
+* {
+  font-family: inherit;
+}
+
+/* Ensure form elements and interactive elements use app font */
+input,
+textarea,
+select,
+button,
+label,
+span,
+div,
+p,
+a {
+  font-family: inherit;
+}
+
+/* Ensure bold text and Tailwind weight utilities are visibly stronger */
+strong,
+b {
+  font-weight: 600;
+}
+.font-semibold {
+  font-weight: 600 !important;
+}
+.font-bold {
+  font-weight: 700 !important;
+}
+.font-extrabold {
+  font-weight: 800 !important;
+}
+
+/* Simple entry animation for step transitions */
+@keyframes fadeInUp {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes confettiFall {
+  0% {
+    transform: translateY(0) rotate(0deg);
+    opacity: 1;
+  }
+  100% {
+    transform: translateY(100vh) rotate(360deg);
+    opacity: 0;
+  }
+}

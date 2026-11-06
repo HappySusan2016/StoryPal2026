@@ -1,0 +1,1064 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>StoryPal • NT-UX Dual-Portal Prototype</title>
+    <style>
+      :root {
+        --bg: #0b1020; /* deep slate */
+        --panel: #0f172a; /* panel bg */
+        --panel-2: #111827; /* secondary panel */
+        --card: #111827; /* card bg */
+        --text: #e5e7eb; /* light text */
+        --muted: #94a3b8; /* muted text */
+        --brand: #38bdf8; /* cyan */
+        --accent: #a78bfa; /* purple */
+        --good: #22c55e; /* green */
+        --warn: #f59e0b; /* amber */
+        --danger: #ef4444; /* red */
+        --radius: 16px;
+        --shadow: 0 10px 20px rgba(0, 0, 0, 0.35), 0 2px 6px rgba(0, 0, 0, 0.25);
+        --border: 1px solid rgba(148, 163, 184, 0.18);
+      }
+      * {
+        box-sizing: border-box;
+      }
+      html,
+      body {
+        height: 100%;
+      }
+      body {
+        margin: 0;
+        font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Epilogue,
+          "Helvetica Neue", Arial, "Noto Sans", "Apple Color Emoji",
+          "Segoe UI Emoji";
+        color: var(--text);
+        background: radial-gradient(
+          1200px 800px at 20% -10%,
+          #1e293b 0%,
+          #0b1020 55%,
+          #070b16 100%
+        );
+      }
+      .app {
+        max-width: 1400px;
+        margin: 24px auto;
+        padding: 0 16px;
+        display: grid;
+        gap: 16px;
+        grid-template-columns: 1.05fr 0.95fr;
+      }
+      header.appbar {
+        grid-column: 1 / -1;
+        background: linear-gradient(180deg, #0f172a 0%, #0b1020 100%);
+        border: var(--border);
+        box-shadow: var(--shadow);
+        border-radius: var(--radius);
+        padding: 16px 18px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+      }
+      .brand {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+      }
+      .brand-logo {
+        width: 40px;
+        height: 40px;
+        border-radius: 12px;
+        background: conic-gradient(
+          from 220deg,
+          var(--brand),
+          var(--accent),
+          #22d3ee,
+          var(--brand)
+        );
+        box-shadow: inset 0 0 16px rgba(255, 255, 255, 0.25),
+          0 6px 18px rgba(56, 189, 248, 0.25);
+        position: relative;
+        isolation: isolate;
+      }
+      .brand-logo:after {
+        content: "";
+        position: absolute;
+        inset: 5px;
+        border-radius: 10px;
+        background: radial-gradient(
+          120px 60px at 30% 35%,
+          rgba(255, 255, 255, 0.35),
+          transparent 55%
+        );
+      }
+      .brand h1 {
+        font-size: 18px;
+        margin: 0;
+        letter-spacing: 0.3px;
+      }
+      .sub {
+        color: var(--muted);
+        font-size: 12px;
+      }
+      .actions {
+        display: flex;
+        gap: 8px;
+      }
+      .btn {
+        appearance: none;
+        border: none;
+        border-radius: 12px;
+        padding: 10px 14px;
+        font-weight: 600;
+        color: #0b1020;
+        cursor: pointer;
+      }
+      .btn-primary {
+        background: var(--brand);
+      }
+      .btn-ghost {
+        background: #1f2937;
+        color: var(--text);
+        border: var(--border);
+      }
+
+      /* Layout */
+      .col {
+        background: linear-gradient(180deg, #0b1224 0%, #0c1222 100%);
+        border: var(--border);
+        border-radius: var(--radius);
+        box-shadow: var(--shadow);
+      }
+      .col-head {
+        padding: 14px 16px;
+        border-bottom: var(--border);
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+      }
+      .col-title {
+        font-weight: 700;
+        letter-spacing: 0.25px;
+      }
+      .col-body {
+        padding: 16px;
+        display: grid;
+        gap: 14px;
+      }
+
+      .pill {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        background: #0f172a;
+        padding: 6px 10px;
+        border-radius: 999px;
+        border: var(--border);
+        color: var(--muted);
+        font-size: 12px;
+      }
+
+      /* Cards */
+      .card {
+        background: var(--card);
+        border: var(--border);
+        border-radius: 14px;
+        padding: 14px;
+        display: grid;
+        gap: 10px;
+      }
+      .card h3 {
+        margin: 0;
+        font-size: 14px;
+        letter-spacing: 0.2px;
+      }
+      .muted {
+        color: var(--muted);
+        font-size: 12px;
+      }
+      .row {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 10px;
+      }
+      .row-3 {
+        display: grid;
+        grid-template-columns: 1fr 1fr 1fr;
+        gap: 10px;
+      }
+      label {
+        font-size: 12px;
+        color: var(--muted);
+      }
+      input[type="text"],
+      select,
+      textarea {
+        width: 100%;
+        padding: 10px 12px;
+        border-radius: 12px;
+        border: var(--border);
+        background: #0b1224;
+        color: var(--text);
+      }
+      textarea {
+        min-height: 72px;
+        resize: vertical;
+      }
+      .btn-row {
+        display: flex;
+        gap: 8px;
+        flex-wrap: wrap;
+      }
+
+      /* Stage Tabs */
+      .stages {
+        display: flex;
+        gap: 8px;
+        flex-wrap: wrap;
+      }
+      .stage {
+        padding: 8px 12px;
+        border-radius: 999px;
+        border: var(--border);
+        background: #0b1224;
+        color: var(--muted);
+        cursor: pointer;
+        font-weight: 600;
+        font-size: 12px;
+      }
+      .stage.active {
+        background: linear-gradient(180deg, #1e293b, #0b1224);
+        color: var(--text);
+        box-shadow: inset 0 0 0 1px rgba(56, 189, 248, 0.35);
+      }
+
+      /* Children Preview */
+      .preview {
+        display: grid;
+        grid-template-rows: auto 1fr auto;
+        gap: 10px;
+        height: calc(100% - 0px);
+        background: radial-gradient(
+          800px 550px at 80% -10%,
+          #0e1930 0%,
+          #0a0f1f 60%
+        );
+        border-radius: var(--radius);
+        overflow: hidden;
+      }
+      .preview-head {
+        padding: 14px 16px;
+        border-bottom: var(--border);
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+      }
+      .device {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+      .device .dot {
+        width: 8px;
+        height: 8px;
+        border-radius: 999px;
+        background: var(--good);
+        box-shadow: 0 0 8px rgba(34, 197, 94, 0.7);
+      }
+
+      .scene {
+        position: relative;
+        display: grid;
+        place-items: center;
+        padding: 16px;
+        overflow: hidden;
+        min-height: 420px;
+      }
+      .scene-art {
+        width: 96%;
+        max-width: 620px;
+        aspect-ratio: 16/9;
+        border-radius: 20px;
+        border: 1px solid rgba(148, 163, 184, 0.25);
+        background: linear-gradient(
+            160deg,
+            rgba(56, 189, 248, 0.15),
+            rgba(167, 139, 250, 0.12)
+          ),
+          radial-gradient(900px 600px at -10% 120%, #0d1326, #0b1224);
+        box-shadow: inset 0 0 0 1px rgba(148, 163, 184, 0.12),
+          0 30px 80px rgba(0, 0, 0, 0.45);
+        position: relative;
+        overflow: hidden;
+      }
+      .bubble {
+        position: absolute;
+        left: 20px;
+        bottom: 20px;
+        max-width: 62%;
+        background: #0b1224;
+        border: 1px solid rgba(148, 163, 184, 0.25);
+        border-radius: 16px;
+        padding: 12px 14px;
+        font-size: 14px;
+        line-height: 1.35;
+      }
+      .bubble strong {
+        color: #fff;
+      }
+      .badge {
+        position: absolute;
+        right: 16px;
+        top: 16px;
+        padding: 6px 10px;
+        border-radius: 12px;
+        border: 1px solid rgba(56, 189, 248, 0.35);
+        background: rgba(56, 189, 248, 0.12);
+        color: #e0f2fe;
+        font-size: 12px;
+        font-weight: 700;
+      }
+
+      .preview-foot {
+        padding: 12px 16px;
+        border-top: var(--border);
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+      }
+      .steps {
+        display: flex;
+        gap: 8px;
+        align-items: center;
+      }
+      .dot-step {
+        width: 10px;
+        height: 10px;
+        border-radius: 999px;
+        background: #1f2a44;
+        border: 1px solid rgba(148, 163, 184, 0.35);
+      }
+      .dot-step.active {
+        background: var(--brand);
+        box-shadow: 0 0 10px rgba(56, 189, 248, 0.9);
+      }
+
+      /* Simple progress cards */
+      .progress {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 10px;
+      }
+      .pstat {
+        background: linear-gradient(180deg, #0d1428, #0b1224);
+        border: var(--border);
+        border-radius: 12px;
+        padding: 10px;
+      }
+      .pstat h4 {
+        margin: 0 0 6px 0;
+        font-size: 12px;
+        color: var(--muted);
+      }
+      .meter {
+        height: 8px;
+        background: #0a0f1f;
+        border: 1px solid rgba(148, 163, 184, 0.25);
+        border-radius: 999px;
+        overflow: hidden;
+      }
+      .meter > i {
+        display: block;
+        height: 100%;
+        width: 40%;
+        background: linear-gradient(90deg, var(--brand), var(--accent));
+      }
+
+      /* Responsive */
+      @media (max-width: 1120px) {
+        .app {
+          grid-template-columns: 1fr;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="app">
+      <header class="appbar">
+        <div class="brand">
+          <div class="brand-logo" aria-hidden="true"></div>
+          <div>
+            <h1>StoryPal • NT‑UX Prototype</h1>
+            <div class="sub">
+              Dual‑portal storyboard: Parent controls (left) ↔ Children preview
+              (right)
+            </div>
+          </div>
+        </div>
+        <div class="actions">
+          <button class="btn btn-ghost" id="resetBtn">Reset</button>
+          <button class="btn btn-primary" id="playBtn">Play Scene ▶</button>
+        </div>
+      </header>
+
+      <!-- LEFT: Parent Portal (Controls) -->
+      <section class="col" id="parentCol" aria-label="Parent Portal Controls">
+        <div class="col-head">
+          <div class="col-title">Parent Portal — NT‑UX Controls</div>
+          <span class="pill">Guided by Narrative Transportation</span>
+        </div>
+        <div class="col-body">
+          <div
+            class="stages"
+            id="stageTabs"
+            role="tablist"
+            aria-label="NT‑UX Stages"
+          >
+            <button
+              class="stage active"
+              data-stage="1"
+              role="tab"
+              aria-selected="true"
+            >
+              1. Framing
+            </button>
+            <button
+              class="stage"
+              data-stage="2"
+              role="tab"
+              aria-selected="false"
+            >
+              2. Immersion
+            </button>
+            <button
+              class="stage"
+              data-stage="3"
+              role="tab"
+              aria-selected="false"
+            >
+              3. Reflection
+            </button>
+            <button
+              class="stage"
+              data-stage="4"
+              role="tab"
+              aria-selected="false"
+            >
+              4. Continuity
+            </button>
+          </div>
+
+          <!-- Stage 1: Framing -->
+          <div class="card" data-panel="1">
+            <h3>Stage 1 · Narrative Framing (Entry)</h3>
+            <div class="muted">
+              Personalize the story setup and align with today's goal.
+            </div>
+            <div class="row">
+              <div>
+                <label>Child’s name</label>
+                <input
+                  type="text"
+                  id="childName"
+                  placeholder="e.g., Emma"
+                  value="Emma"
+                />
+              </div>
+              <div>
+                <label>Today's focus</label>
+                <select id="focus">
+                  <option value="greeting">Greeting / Saying hello</option>
+                  <option value="sharing">Sharing / Turn‑taking</option>
+                  <option value="routine">Morning routine</option>
+                  <option value="sensory">Managing sensory surprises</option>
+                </select>
+              </div>
+            </div>
+            <div class="row">
+              <div>
+                <label>Scenario</label>
+                <select id="scenario">
+                  <option value="school">School: arrival and wave</option>
+                  <option value="playdate">Playdate: meet a new friend</option>
+                  <option value="store">Grocery store: checkout line</option>
+                  <option value="clinic">Clinic: waiting room</option>
+                </select>
+              </div>
+              <div>
+                <label>Desired tone</label>
+                <select id="tone">
+                  <option value="brave">Encouraging & brave</option>
+                  <option value="calm">Calm & soothing</option>
+                  <option value="curious">Curious & playful</option>
+                </select>
+              </div>
+            </div>
+            <div>
+              <label>Parent goal (optional)</label>
+              <input
+                type="text"
+                id="parentGoal"
+                placeholder="e.g., Practice waving back to a classmate"
+              />
+            </div>
+            <div class="btn-row">
+              <button class="btn btn-primary" id="primeSceneBtn">
+                Prime Story ✨
+              </button>
+              <button class="btn btn-ghost" id="sampleIntroBtn">
+                Use Sample Intro
+              </button>
+            </div>
+          </div>
+
+          <!-- Stage 2: Immersion -->
+          <div class="card" data-panel="2" hidden>
+            <h3>Stage 2 · Cognitive & Emotional Transportation (Immersion)</h3>
+            <div class="muted">
+              Guide imagery and perspective‑taking; co‑play the avatar.
+            </div>
+            <div class="row">
+              <div>
+                <label>Current feeling</label>
+                <select id="feeling">
+                  <option value="shy">Shy</option>
+                  <option value="excited">Excited</option>
+                  <option value="nervous">Nervous</option>
+                  <option value="proud">Proud</option>
+                </select>
+              </div>
+              <div>
+                <label>Co‑play prompt</label>
+                <select id="coplay">
+                  <option value="wave">Practice a superhero wave</option>
+                  <option value="share">Offer a toy and say “your turn”</option>
+                  <option value="count">Count to three together</option>
+                  <option value="breathe">Do a 3‑breath sparkle</option>
+                </select>
+              </div>
+            </div>
+            <div>
+              <label>Imagery line (parent cue)</label>
+              <textarea
+                id="imagery"
+                placeholder="Describe what your child sees (e.g., 'Blue backpack, Mia smiles and waves')."
+              ></textarea>
+            </div>
+            <div class="btn-row">
+              <button class="btn btn-primary" id="immerseBtn">
+                Update Scene 🎭
+              </button>
+              <button class="btn btn-ghost" id="soundBtn">
+                Play Prompt (simulated)
+              </button>
+            </div>
+          </div>
+
+          <!-- Stage 3: Reflection -->
+          <div class="card" data-panel="3" hidden>
+            <h3>Stage 3 · Reflection & Meaning‑Making</h3>
+            <div class="muted">
+              Connect the story to real‑life experiences and log progress.
+            </div>
+            <div>
+              <label>What did your child try?</label>
+              <input
+                type="text"
+                id="tried"
+                placeholder="e.g., Emma waved back and smiled"
+              />
+            </div>
+            <div class="row">
+              <div>
+                <label>Parent confidence (self‑efficacy)</label>
+                <select id="confidence">
+                  <option>Low</option>
+                  <option selected>Medium</option>
+                  <option>High</option>
+                </select>
+              </div>
+              <div>
+                <label>Child comfort</label>
+                <select id="comfort">
+                  <option>Low</option>
+                  <option selected>Medium</option>
+                  <option>High</option>
+                </select>
+              </div>
+            </div>
+            <div class="progress">
+              <div class="pstat">
+                <h4>Theme • Empathy</h4>
+                <div class="meter"><i style="width: 48%"></i></div>
+              </div>
+              <div class="pstat">
+                <h4>Theme • Turn‑Taking</h4>
+                <div class="meter"><i style="width: 32%"></i></div>
+              </div>
+            </div>
+            <div class="btn-row">
+              <button class="btn btn-primary" id="reflectBtn">
+                Log Reflection ✅
+              </button>
+              <button class="btn btn-ghost" id="cheerBtn">
+                Send Praise 🌟
+              </button>
+            </div>
+          </div>
+
+          <!-- Stage 4: Continuity -->
+          <div class="card" data-panel="4" hidden>
+            <h3>Stage 4 · Re‑engagement & Continuity</h3>
+            <div class="muted">
+              Keep the arc going with micro‑quests and badges.
+            </div>
+            <div class="row-3">
+              <div>
+                <label>Next arc</label>
+                <select id="nextArc">
+                  <option value="school-arc">School Adventure (week)</option>
+                  <option value="friend-arc">New Friend Mini‑Arc</option>
+                  <option value="store-arc">Helper at the Store</option>
+                </select>
+              </div>
+              <div>
+                <label>Reminder cadence</label>
+                <select id="cadence">
+                  <option>Daily</option>
+                  <option selected>Every 2 days</option>
+                  <option>Weekly</option>
+                </select>
+              </div>
+              <div>
+                <label>Badge</label>
+                <select id="badge">
+                  <option value="bravery">Bravery Badge</option>
+                  <option value="sharing">Sharing Star</option>
+                  <option value="helper">Helpful Hero</option>
+                </select>
+              </div>
+            </div>
+            <div class="btn-row">
+              <button class="btn btn-primary" id="continueBtn">
+                Queue Next Episode ➡
+              </button>
+              <button class="btn btn-ghost" id="printBtn">
+                Print Badge (simulated)
+              </button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- RIGHT: Children Portal Preview -->
+      <section class="col preview" aria-label="Children Portal Preview">
+        <div class="preview-head">
+          <div class="device">
+            <span class="dot" aria-hidden="true"></span
+            ><strong>Children Portal</strong>
+            <span class="sub" style="margin-left: 8px">Live scene preview</span>
+          </div>
+          <span class="pill" id="scenePill"
+            >Scene: School • Tone: Encouraging</span
+          >
+        </div>
+
+        <div class="scene">
+          <!-- SVG Illustration acts as an "image" to ensure it renders offline -->
+          <figure class="scene-art" aria-label="Illustrated scene">
+            <!-- Background shapes -->
+            <svg
+              viewBox="0 0 1200 675"
+              width="100%"
+              height="100%"
+              preserveAspectRatio="xMidYMid slice"
+              aria-hidden="true"
+            >
+              <defs>
+                <linearGradient id="sky" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0%" stop-color="#0ea5e9" stop-opacity="0.35" />
+                  <stop
+                    offset="100%"
+                    stop-color="#4f46e5"
+                    stop-opacity="0.18"
+                  />
+                </linearGradient>
+                <linearGradient id="ground" x1="0" y1="0" x2="1" y2="1">
+                  <stop offset="0%" stop-color="#0ea5e9" stop-opacity="0.25" />
+                  <stop
+                    offset="100%"
+                    stop-color="#a78bfa"
+                    stop-opacity="0.18"
+                  />
+                </linearGradient>
+              </defs>
+              <rect x="0" y="0" width="1200" height="675" fill="url(#sky)" />
+              <g id="scene-layer"></g>
+              <!-- ground -->
+              <rect
+                x="0"
+                y="520"
+                width="1200"
+                height="200"
+                fill="url(#ground)"
+              />
+              <!-- character: child -->
+              <g id="child" transform="translate(370,360)">
+                <circle cx="0" cy="0" r="58" fill="#fde68a" />
+                <rect
+                  x="-34"
+                  y="52"
+                  width="68"
+                  height="110"
+                  rx="18"
+                  fill="#60a5fa"
+                />
+                <circle cx="-18" cy="-8" r="6" fill="#111827" />
+                <circle cx="18" cy="-8" r="6" fill="#111827" />
+                <path
+                  d="M -18 18 Q 0 30 18 18"
+                  stroke="#111827"
+                  stroke-width="4"
+                  fill="none"
+                />
+                <path
+                  d="M -60 140 Q 0 110 60 140"
+                  stroke="#38bdf8"
+                  stroke-width="8"
+                  fill="none"
+                  stroke-linecap="round"
+                />
+              </g>
+              <!-- character: friend -->
+              <g id="friend" transform="translate(830,370)">
+                <circle cx="0" cy="0" r="50" fill="#fca5a5" />
+                <rect
+                  x="-30"
+                  y="46"
+                  width="60"
+                  height="100"
+                  rx="16"
+                  fill="#a78bfa"
+                />
+                <circle cx="-14" cy="-6" r="5" fill="#111827" />
+                <circle cx="14" cy="-6" r="5" fill="#111827" />
+                <path
+                  d="M -14 16 Q 0 26 14 16"
+                  stroke="#111827"
+                  stroke-width="4"
+                  fill="none"
+                />
+                <!-- waving hand -->
+                <circle id="friend-hand" cx="38" cy="82" r="10" fill="#fca5a5">
+                  <animate
+                    attributeName="cy"
+                    values="82;70;82"
+                    dur="1.8s"
+                    repeatCount="indefinite"
+                  />
+                </circle>
+              </g>
+              <!-- environment items -->
+              <g id="env">
+                <rect
+                  x="80"
+                  y="140"
+                  width="200"
+                  height="140"
+                  rx="14"
+                  fill="#334155"
+                  opacity=".5"
+                />
+                <rect
+                  x="940"
+                  y="120"
+                  width="160"
+                  height="120"
+                  rx="14"
+                  fill="#334155"
+                  opacity=".5"
+                />
+                <g opacity=".45">
+                  <circle cx="180" cy="560" r="50" fill="#22d3ee" />
+                  <circle cx="1120" cy="560" r="40" fill="#a78bfa" />
+                </g>
+              </g>
+            </svg>
+            <div class="badge" id="badge">Bravery Badge</div>
+            <figcaption class="bubble" id="bubble">
+              <strong>Emma</strong> sees Mia waving. Can we try a superhero
+              hello together?
+            </figcaption>
+          </figure>
+        </div>
+
+        <div class="preview-foot">
+          <div class="steps" aria-label="Episode steps">
+            <div class="dot-step active" data-step="1"></div>
+            <div class="dot-step" data-step="2"></div>
+            <div class="dot-step" data-step="3"></div>
+            <div class="dot-step" data-step="4"></div>
+          </div>
+          <div class="sub">
+            NT‑UX: <strong id="stageLabel">Stage 1: Framing</strong>
+          </div>
+        </div>
+      </section>
+    </div>
+
+    <script>
+      // Utilities
+      const $ = (sel, root = document) => root.querySelector(sel);
+      const $$ = (sel, root = document) =>
+        Array.from(root.querySelectorAll(sel));
+      const setActiveStage = (n) => {
+        $$("#stageTabs .stage").forEach((btn) => {
+          const on = +btn.dataset.stage === n;
+          btn.classList.toggle("active", on);
+          btn.setAttribute("aria-selected", on);
+        });
+        $$("[data-panel]").forEach((p) => (p.hidden = +p.dataset.panel !== n));
+        $("#stageLabel").textContent = `Stage ${n}: ${
+          ["Framing", "Immersion", "Reflection", "Continuity"][n - 1]
+        }`;
+        // Step dots
+        $$(".dot-step").forEach((d, i) =>
+          d.classList.toggle("active", i === n - 1)
+        );
+      };
+
+      // State
+      const state = {
+        childName: "Emma",
+        focus: "greeting",
+        scenario: "school",
+        tone: "brave",
+        feeling: "shy",
+        coplay: "wave",
+        imagery: "",
+        badge: "bravery",
+      };
+
+      // Bind controls
+      $("#childName").addEventListener(
+        "input",
+        (e) => (state.childName = e.target.value || "Child")
+      );
+      $("#focus").addEventListener("change", (e) => {
+        state.focus = e.target.value;
+        updatePill();
+        updateBubble();
+      });
+      $("#scenario").addEventListener("change", (e) => {
+        state.scenario = e.target.value;
+        updatePill();
+        updateSceneDecor();
+      });
+      $("#tone").addEventListener("change", (e) => {
+        state.tone = e.target.value;
+        updatePill();
+        updateBubble();
+      });
+      $("#parentGoal").addEventListener("input", () => {
+        /* optional */
+      });
+      $("#feeling").addEventListener("change", (e) => {
+        state.feeling = e.target.value;
+        updateBubble();
+      });
+      $("#coplay").addEventListener("change", (e) => {
+        state.coplay = e.target.value;
+        updateBubble();
+      });
+      $("#imagery").addEventListener("input", (e) => {
+        state.imagery = e.target.value;
+        updateBubble();
+      });
+      $("#badge").addEventListener("change", (e) => {
+        state.badge = e.target.value;
+        updateBadge();
+      });
+
+      // Stage tab clicks
+      $$("#stageTabs .stage").forEach((btn) =>
+        btn.addEventListener("click", () => setActiveStage(+btn.dataset.stage))
+      );
+
+      // Buttons
+      $("#primeSceneBtn").addEventListener("click", () => {
+        setActiveStage(2);
+        pop("Primed scene with your framing.");
+      });
+      $("#sampleIntroBtn").addEventListener("click", () => {
+        $("#parentGoal").value = "Practice waving back to a classmate";
+        $("#imagery").value =
+          "Blue backpack, sun on the floor, Mia smiles and waves.";
+        state.imagery = $("#imagery").value;
+        updateBubble();
+        pop("Loaded sample intro & imagery.");
+      });
+      $("#immerseBtn").addEventListener("click", () => {
+        setActiveStage(3);
+        pop("Updated immersion cues.");
+      });
+      $("#soundBtn").addEventListener("click", () =>
+        pop("Playing prompt… (simulated)")
+      );
+      $("#reflectBtn").addEventListener("click", () => {
+        setActiveStage(4);
+        pop("Reflection logged ✓");
+        animateMeter();
+      });
+      $("#cheerBtn").addEventListener("click", () =>
+        pop("🎉 Praises sent! Great job.")
+      );
+      $("#continueBtn").addEventListener("click", () => {
+        setActiveStage(1);
+        pop("Next episode queued.");
+      });
+      $("#printBtn").addEventListener("click", () =>
+        pop("Preparing printable badge… (simulated)")
+      );
+      $("#playBtn").addEventListener("click", () => pop("Scene playing…"));
+      $("#resetBtn").addEventListener("click", () => {
+        window.location.reload();
+      });
+
+      function updatePill() {
+        const focusMap = {
+          greeting: "Greeting",
+          sharing: "Sharing",
+          routine: "Routine",
+          sensory: "Sensory",
+        };
+        const toneMap = {
+          brave: "Encouraging",
+          calm: "Calm",
+          curious: "Playful",
+        };
+        $("#scenePill").textContent = `Scene: ${capitalize(
+          state.scenario
+        )} • Tone: ${toneMap[state.tone]}`;
+      }
+
+      function updateBadge() {
+        const map = {
+          bravery: "Bravery Badge",
+          sharing: "Sharing Star",
+          helper: "Helpful Hero",
+        };
+        $("#badge").textContent = map[state.badge] || "Story Badge";
+      }
+
+      function updateBubble() {
+        const actionMap = {
+          wave: "try a superhero hello",
+          share: "offer a toy and say “your turn”",
+          count: "count to three together",
+          breathe: "do three sparkle breaths",
+        };
+        const feelMap = {
+          shy: "feels a bit shy",
+          excited: "feels excited",
+          nervous: "feels a little nervous",
+          proud: "feels proud",
+        };
+        const scenemap = {
+          school: `${state.childName} ${
+            feelMap[state.feeling]
+          } at school. Can we ${actionMap[state.coplay]}?`,
+          playdate: `${state.childName} ${
+            feelMap[state.feeling]
+          } at the playdate. Can we ${actionMap[state.coplay]}?`,
+          store: `${state.childName} ${
+            feelMap[state.feeling]
+          } at the store. Can we ${actionMap[state.coplay]}?`,
+          clinic: `${state.childName} ${
+            feelMap[state.feeling]
+          } at the clinic. Can we ${actionMap[state.coplay]}?`,
+        };
+        const imagery = state.imagery ? `\n\nYou see: ${state.imagery}` : "";
+        $("#bubble").innerHTML = `<strong>${escapeHtml(
+          state.childName
+        )}</strong> ${scenemap[state.scenario]}${imagery}`;
+      }
+
+      function updateSceneDecor() {
+        // Move friend/child positions subtly per scenario (visual variety)
+        const child = $("#child");
+        const friend = $("#friend");
+        const env = $("#env");
+        if (state.scenario === "school") {
+          child.setAttribute("transform", "translate(370,360)");
+          friend.setAttribute("transform", "translate(830,370)");
+          env.style.opacity = 0.8;
+        } else if (state.scenario === "playdate") {
+          child.setAttribute("transform", "translate(440,380)");
+          friend.setAttribute("transform", "translate(740,360)");
+          env.style.opacity = 0.6;
+        } else if (state.scenario === "store") {
+          child.setAttribute("transform", "translate(500,380)");
+          friend.setAttribute("transform", "translate(900,360)");
+          env.style.opacity = 0.5;
+        } else {
+          // clinic
+          child.setAttribute("transform", "translate(380,370)");
+          friend.setAttribute("transform", "translate(900,380)");
+          env.style.opacity = 0.7;
+        }
+      }
+
+      function animateMeter() {
+        $$(".meter > i").forEach((bar) => {
+          const w = Math.min(
+            90,
+            Math.random() * 40 + parseFloat(bar.style.width || "30")
+          ); // bump 30-70%
+          bar.style.transition = "width .8s ease";
+          bar.style.width = w + "%";
+        });
+      }
+
+      function pop(msg) {
+        const n = document.createElement("div");
+        n.textContent = msg;
+        n.style.position = "fixed";
+        n.style.right = "18px";
+        n.style.bottom = "18px";
+        n.style.zIndex = 50;
+        n.style.background = "rgba(15,23,42,.95)";
+        n.style.border = "1px solid rgba(148,163,184,.25)";
+        n.style.padding = "10px 12px";
+        n.style.borderRadius = "12px";
+        n.style.boxShadow = "0 8px 20px rgba(0,0,0,.35)";
+        n.style.fontSize = "12px";
+        document.body.appendChild(n);
+        setTimeout(() => n.remove(), 1800);
+      }
+
+      function capitalize(s) {
+        return s.charAt(0).toUpperCase() + s.slice(1);
+      }
+      function escapeHtml(s) {
+        return s.replace(
+          /[&<>"']/g,
+          (m) =>
+            ({
+              "&": "&amp;",
+              "<": "&lt;",
+              ">": "&gt;",
+              '"': "&quot;",
+              "'": "&#39;",
+            }[m])
+        );
+      }
+
+      // Initial
+      updatePill();
+      updateBubble();
+      updateSceneDecor();
+      updateBadge();
+    </script>
+  </body>
+</html>
