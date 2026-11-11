@@ -1,15 +1,6 @@
-import { GoogleGenerativeAI } from "@google/generative-ai";
+import { candidateModels, fetchGemini } from "@/app/lib/gemini";
 
-// Define a list of fallback models to try
-const MODEL_FALLBACKS = [
-  "gemini-2.0-flash-exp",
-  "gemini-2.0-flash",
-  "gemini-1.5-flash",
-  "gemini-1.5-flash-001",
-  "gemini-1.5-flash-latest",
-  "gemini-1.5-pro",
-  "gemini-1.5-pro-002",
-];
+export const runtime = "nodejs";
 
 export async function POST(req) {
   try {
@@ -30,8 +21,6 @@ export async function POST(req) {
         { status: 500 }
       );
     }
-
-    const genAI = new GoogleGenerativeAI(apiKey);
 
     // Build the prompt for generating co-action guidance
     const systemPrompt = `You are an expert in parent-child co-action for children with autism and communication needs. Your role is to generate helpful, concise co-action prompts for parents to use when going through interactive stories with their children.
@@ -84,13 +73,9 @@ Generate a co-action prompt for this story step.`;
     let triedModels = [];
 
     // Try each model in sequence
-    for (const modelName of MODEL_FALLBACKS) {
+    for (const modelName of candidateModels) {
       try {
         triedModels.push(modelName);
-        const model = genAI.getGenerativeModel({
-          model: modelName,
-        });
-
         const payload = {
           contents: [
             { role: "user", parts: [{ text: systemPrompt }] },
@@ -110,8 +95,21 @@ Generate a co-action prompt for this story step.`;
           ],
         };
 
-        const result = await model.generateContent(payload);
-        const resp = result.response;
+        const response = await fetchGemini(
+          `${modelName}:generateContent`,
+          apiKey,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload),
+          }
+        );
+        if (!response.ok) {
+          // 保留状态码和错误正文，供现有配额判断与模型回退逻辑使用。
+          const errorText = await response.text();
+          throw new Error(`Gemini ${response.status}: ${errorText}`);
+        }
+        const resp = await response.json();
 
         // Extract function call
         const candidate = resp.candidates?.[0];

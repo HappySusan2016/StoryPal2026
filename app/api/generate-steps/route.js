@@ -1,9 +1,12 @@
+import { candidateModels, fetchGemini } from "@/app/lib/gemini";
+
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 async function listModels(apiKey) {
-  const resp = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models?key=${apiKey}`,
+  const resp = await fetchGemini(
+    "models",
+    apiKey,
     { method: "GET" }
   );
   if (!resp.ok) return [];
@@ -101,8 +104,9 @@ function normalizeOneStep(rawStep) {
 }
 
 async function callGemini({ apiKey, modelName, payload }) {
-  const resp = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/${modelName}:generateContent?key=${apiKey}`,
+  const resp = await fetchGemini(
+    `${modelName}:generateContent`,
+    apiKey,
     {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -278,16 +282,6 @@ previousSteps: ${JSON.stringify(previousSteps)}
         maxOutputTokens: 800,
       },
     };
-
-    // Try a short fallback list, then auto-discover via ListModels if needed.
-    const candidateModels = [
-      "models/gemini-2.5-flash",
-      "models/gemini-2.0-flash",
-      "models/gemini-2.0-flash-001",
-      "models/gemini-1.5-flash-001",
-      "models/gemini-1.5-flash-latest",
-      "models/gemini-1.5-pro-002",
-    ];
 
     let lastErrText = "";
     let chosenModel = null;
