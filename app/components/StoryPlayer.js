@@ -2,7 +2,9 @@
 
 import { useState, useMemo, useEffect, useRef } from "react";
 import Image from "next/image";
-import { Sparkles } from "lucide-react";
+import { flushSync } from "react-dom";
+import { printStoryPages } from "./printStoryPages";
+import { Printer, Sparkles } from "lucide-react";
 
 /**
  * A reusable player that renders a sequence of story steps.
@@ -347,8 +349,6 @@ export default function StoryPlayer({
     }, 1500);
   }
 
-  if (!Array.isArray(steps) || steps.length === 0) return null;
-
   // State for AI-generated co-action prompts
   const [aiGuides, setAiGuides] = useState({});
   const [loadingGuide, setLoadingGuide] = useState(false);
@@ -473,6 +473,166 @@ export default function StoryPlayer({
     return null;
   }, [currentStep, currentStepIndex, aiGuides, loadingGuide]);
 
+  /** @module 绘本内容展示 */
+  function renderStoryContent(step, isPrintPage = false) {
+    return (
+      <>
+          {coverImage ? (
+            <div className="story-print-cover relative w-full aspect-4/3 overflow-hidden">
+              <Image
+                src={coverImage}
+                alt={title}
+                fill
+                className="object-cover"
+                unoptimized
+                sizes="90vw"
+              />
+            </div>
+          ) : moduleId === "parent-training" ? (
+            <div className="story-print-cover relative w-full aspect-4/3 overflow-hidden bg-gradient-to-br from-purple-100 via-pink-50 to-blue-50 flex items-center justify-center">
+              <div className="flex flex-col items-center gap-4 text-purple-700">
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  className="w-24 h-24"
+                  viewBox="0 0 20 20"
+                  fill="currentColor"
+                >
+                  <path d="M9 6a3 3 0 11-6 0 3 3 0 016 0zM17 6a3 3 0 11-6 0 3 3 0 016 0zM12.93 17c.046-.327.07-.66.07-1a6.97 6.97 0 00-1.5-4.33A5 5 0 0119 16v1h-6.07zM6 11a5 5 0 015 5v1H1v-1a5 5 0 015-5z" />
+                </svg>
+                <span className="text-lg font-semibold">Parent Training</span>
+              </div>
+            </div>
+          ) : null}
+          <div className="story-print-copy p-6 flex-1 flex flex-col" style={fontStyle}>
+            <h3
+              className="text-2xl font-semibold text-zinc-900 mb-4"
+              style={fontStyle}
+            >
+              {interpolate(title)}
+            </h3>
+
+            {step && (
+              <div className="story-print-step flex-1 space-y-4">
+                {step.imageUrl && (
+                  <div className="story-print-step-image w-full rounded-2xl overflow-hidden border border-zinc-200">
+                    <img
+                      src={step.imageUrl}
+                      alt={interpolate(step.message || title)}
+                      className="w-full h-48 object-cover"
+                    />
+                  </div>
+                )}
+
+                {step.type === "doctor" && (
+                  <div className="bg-[#f5f0ff] rounded-2xl p-4 border border-[#e4d7ff]">
+                    <p
+                      className="text-zinc-900 text-lg leading-relaxed"
+                      style={fontStyle}
+                    >
+                      {interpolate(step.message || "")}
+                    </p>
+                  </div>
+                )}
+
+                {step.type === "user-input" && (
+                  <div className="space-y-3">
+                    <div className="bg-[#f5f0ff] rounded-2xl p-4 border border-[#e4d7ff]">
+                      <p
+                        className="text-zinc-900 text-lg mb-2"
+                        style={fontStyle}
+                      >
+                        {interpolate(step.message || "")}
+                      </p>
+                    </div>
+                    <input
+                      type="text"
+                      value={isPrintPage && step !== currentStep ? "" : userInputValue}
+                      onChange={(e) => setUserInputValue(e.target.value)}
+                      placeholder={interpolate(
+                        step.placeholder || "Enter your answer here..."
+                      )}
+                      className="w-full bg-white/90 border-2 border-zinc-200 rounded-xl px-4 py-3 text-zinc-900 placeholder-zinc-400 focus:outline-none focus:ring-2 focus:ring-blue-300 focus:border-blue-300 transition-all"
+                      style={fontStyle}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter" && userInputValue.trim()) {
+                          handleNext();
+                        }
+                      }}
+                      autoFocus={!isPrintPage}
+                    />
+                  </div>
+                )}
+
+                {step.type === "choice" &&
+                  Array.isArray(step.options) && (
+                    <div className="space-y-3">
+                      <div className="bg-[#f5f0ff] rounded-2xl p-4 border border-[#e4d7ff]">
+                        <p
+                          className="text-zinc-900 text-lg mb-2"
+                          style={fontStyle}
+                        >
+                          {interpolate(step.message || "")}
+                        </p>
+                      </div>
+                      <div className="story-print-options grid grid-cols-2 gap-3">
+                        {step.options.map((option, idx) => {
+                          const label = interpolate(option);
+                          return (
+                            <button
+                              key={idx}
+                              type="button"
+                              onClick={() => setSelectedChoice(label)}
+                              className={`rounded-xl px-4 py-3 text-sm font-medium transition-all ${
+                                (!isPrintPage || step === currentStep) && selectedChoice === label
+                                  ? "bg-[#5b217f] text-white shadow-md"
+                                  : "bg-zinc-100 text-zinc-700 hover:bg-zinc-200"
+                              }`}
+                              style={fontStyle}
+                            >
+                              {label}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+
+              </div>
+            )}
+          </div>
+      </>
+    );
+  }
+
+  /** @module 绘本打印 */
+  const printPagesRef = useRef(null);
+  const printingRef = useRef(false);
+  const [isPrinting, setIsPrinting] = useState(false);
+  const [printError, setPrintError] = useState("");
+
+  // 单独渲染全部页，避免翻页、朗读及奖励等阅读副作用。
+  async function handlePrint() {
+    if (printingRef.current || !steps.length) return;
+    printingRef.current = true;
+    setPrintError("");
+    try {
+      flushSync(() => setIsPrinting(true));
+      await printStoryPages(
+        printPagesRef.current,
+        interpolate(title),
+      );
+    } catch (error) {
+      console.error("Story printing failed:", error);
+      setPrintError("Unable to prepare printing. Please try again.");
+    } finally {
+      printingRef.current = false;
+      setIsPrinting(false);
+    }
+  }
+
+  // 所有 Hook 执行后再处理空绘本，保证调用顺序稳定。
+  if (!Array.isArray(steps) || steps.length === 0) return null;
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
       <div
@@ -482,6 +642,29 @@ export default function StoryPlayer({
       <div className="relative z-10 w-full max-w-6xl max-h-[90vh] min-h-[600px] rounded-2xl bg-white shadow-lg animate-[fadeInUp_200ms_ease-out] flex flex-col lg:flex-row overflow-hidden story-player-content">
         {/* Main Story Content */}
         <div className="flex-1 flex flex-col overflow-y-auto relative">
+          {/* 打印入口位于音频设置左侧，全部控制按钮不进入打印内容。 */}
+          <button
+            type="button"
+            onClick={handlePrint}
+            disabled={isPrinting || !steps.length}
+            className="hidden lg:flex absolute top-4 right-28 z-10 w-10 h-10 rounded-full bg-white/80 hover:bg-white shadow-md items-center justify-center text-zinc-700 disabled:opacity-50"
+            aria-label="Print"
+            title="Print"
+          >
+            <Printer className="w-5 h-5" />
+          </button>
+          {printError && <p role="alert" className="p-4 text-red-700">{printError}</p>}
+          {isPrinting && (
+            <div aria-hidden="true" style={{ position: "fixed", left: "-100000px", top: 0, width: 640, pointerEvents: "none" }}>
+              <div ref={printPagesRef}>
+                {steps.map((step, index) => (
+                  <section className="story-print-page" key={index}>
+                    <div className="story-print-content bg-white">{renderStoryContent(step, true)}</div>
+                  </section>
+                ))}
+              </div>
+            </div>
+          )}
           {/* Close button for desktop */}
           <button
             type="button"
@@ -754,128 +937,15 @@ export default function StoryPlayer({
             </div>
           )}
 
-          {coverImage ? (
-            <div className="relative w-full aspect-4/3 overflow-hidden">
-              <Image
-                src={coverImage}
-                alt={title}
-                fill
-                className="object-cover"
-                unoptimized
-                sizes="90vw"
-              />
-            </div>
-          ) : moduleId === "parent-training" ? (
-            <div className="relative w-full aspect-4/3 overflow-hidden bg-gradient-to-br from-purple-100 via-pink-50 to-blue-50 flex items-center justify-center">
-              <div className="flex flex-col items-center gap-4 text-purple-700">
-                <svg
-                  xmlns="http://www.w3.org/2000/svg"
-                  className="w-24 h-24"
-                  viewBox="0 0 20 20"
-                  fill="currentColor"
-                >
-                  <path d="M9 6a3 3 0 11-6 0 3 3 0 016 0zM17 6a3 3 0 11-6 0 3 3 0 016 0zM12.93 17c.046-.327.07-.66.07-1a6.97 6.97 0 00-1.5-4.33A5 5 0 0119 16v1h-6.07zM6 11a5 5 0 015 5v1H1v-1a5 5 0 015-5z" />
-                </svg>
-                <span className="text-lg font-semibold">Parent Training</span>
-              </div>
-            </div>
-          ) : null}
-          <div className="p-6 flex-1 flex flex-col" style={fontStyle}>
-            <h3
-              className="text-2xl font-semibold text-zinc-900 mb-4"
-              style={fontStyle}
-            >
-              {interpolate(title)}
-            </h3>
-
+          {renderStoryContent(currentStep)}
+          <div className="px-6 pb-6">
             {currentStep && (
-              <div className="flex-1 space-y-4">
-                {currentStep.imageUrl && (
-                  <div className="w-full rounded-2xl overflow-hidden border border-zinc-200">
-                    <img
-                      src={currentStep.imageUrl}
-                      alt={interpolate(currentStep.message || title)}
-                      className="w-full h-48 object-cover"
-                    />
-                  </div>
-                )}
-
-                {currentStep.type === "doctor" && (
-                  <div className="bg-[#f5f0ff] rounded-2xl p-4 border border-[#e4d7ff]">
-                    <p
-                      className="text-zinc-900 text-lg leading-relaxed"
-                      style={fontStyle}
-                    >
-                      {interpolate(currentStep.message || "")}
-                    </p>
-                  </div>
-                )}
-
-                {currentStep.type === "user-input" && (
-                  <div className="space-y-3">
-                    <div className="bg-[#f5f0ff] rounded-2xl p-4 border border-[#e4d7ff]">
-                      <p
-                        className="text-zinc-900 text-lg mb-2"
-                        style={fontStyle}
-                      >
-                        {interpolate(currentStep.message || "")}
-                      </p>
-                    </div>
-                    <input
-                      type="text"
-                      value={userInputValue}
-                      onChange={(e) => setUserInputValue(e.target.value)}
-                      placeholder={interpolate(
-                        currentStep.placeholder || "Enter your answer here..."
-                      )}
-                      className="w-full bg-white/90 border-2 border-zinc-200 rounded-xl px-4 py-3 text-zinc-900 placeholder-zinc-400 focus:outline-none focus:ring-2 focus:ring-blue-300 focus:border-blue-300 transition-all"
-                      style={fontStyle}
-                      onKeyDown={(e) => {
-                        if (e.key === "Enter" && userInputValue.trim()) {
-                          handleNext();
-                        }
-                      }}
-                      autoFocus
-                    />
-                  </div>
-                )}
-
-                {currentStep.type === "choice" &&
-                  Array.isArray(currentStep.options) && (
-                    <div className="space-y-3">
-                      <div className="bg-[#f5f0ff] rounded-2xl p-4 border border-[#e4d7ff]">
-                        <p
-                          className="text-zinc-900 text-lg mb-2"
-                          style={fontStyle}
-                        >
-                          {interpolate(currentStep.message || "")}
-                        </p>
-                      </div>
-                      <div className="grid grid-cols-2 gap-3">
-                        {currentStep.options.map((option, idx) => {
-                          const label = interpolate(option);
-                          return (
-                            <button
-                              key={idx}
-                              type="button"
-                              onClick={() => setSelectedChoice(label)}
-                              className={`rounded-xl px-4 py-3 text-sm font-medium transition-all ${
-                                selectedChoice === label
-                                  ? "bg-[#5b217f] text-white shadow-md"
-                                  : "bg-zinc-100 text-zinc-700 hover:bg-zinc-200"
-                              }`}
-                              style={fontStyle}
-                            >
-                              {label}
-                            </button>
-                          );
-                        })}
-                      </div>
-                    </div>
-                  )}
-
+              <div>
                 <div className="flex justify-between items-center pt-4 border-t border-zinc-200 lg:hidden">
                   <div className="flex items-center gap-2">
+                    <button type="button" onClick={handlePrint} disabled={isPrinting || !steps.length} aria-label="Print" className="rounded-xl px-3 py-2 text-zinc-700 hover:bg-zinc-100 disabled:opacity-50">
+                      <Printer className="w-5 h-5" />
+                    </button>
                     <button
                       type="button"
                       onClick={() => setShowAudioControls(!showAudioControls)}
