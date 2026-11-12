@@ -5,6 +5,7 @@ import Image from "next/image";
 import { flushSync } from "react-dom";
 import { printStoryPages } from "./printStoryPages";
 import { Printer, Sparkles } from "lucide-react";
+import { isValidParentGuide } from "../lib/parentGuides";
 
 /**
  * A reusable player that renders a sequence of story steps.
@@ -349,90 +350,80 @@ export default function StoryPlayer({
     }, 1500);
   }
 
-  // State for AI-generated co-action prompts
+  /** @module 父母引导生成与异常回退 */
   const [aiGuides, setAiGuides] = useState({});
-  const [loadingGuide, setLoadingGuide] = useState(false);
-  const [guideError, setGuideError] = useState(null);
+  const [guideRequest, setGuideRequest] = useState(null);
+  // 使用完整内容与儿童上下文区分缓存，避免复用另一故事或儿童的引导。
+  const guideRequestBody = JSON.stringify({
+    stepType: currentStep?.type,
+    stepMessage: currentStep?.message || "",
+    storyTitle: title,
+    childContext: templateContext,
+  });
+  const stepKey = JSON.stringify([moduleId, currentStepIndex, guideRequestBody]);
+  const cachedGuide = aiGuides[stepKey];
+  const loadingGuide = guideRequest?.key === stepKey && guideRequest.status === "loading";
+  const guideError = guideRequest?.key === stepKey ? guideRequest.error : null;
 
-  // Generate AI co-action prompt for current step
   useEffect(() => {
-    if (!currentStep) return;
+    if (!currentStep || isValidParentGuide(currentStep.parentGuide)) return;
+    if (process.env.NEXT_PUBLIC_DISABLE_AI_COACTION === "true") return;
+    if (isValidParentGuide(cachedGuide)) return;
 
-    // Check if step has custom parent guide
-    if (currentStep.parentGuide) return;
+    const controller = new AbortController();
+    const signal = AbortSignal.any([controller.signal, AbortSignal.timeout(60000)]);
+    let active = true;
 
-    // Check if AI co-action is disabled via environment variable
-    if (process.env.NEXT_PUBLIC_DISABLE_AI_COACTION === "true") {
-      return; // Skip AI generation, use fallback prompts
-    }
-
-    // Check if we already have an AI guide for this step
-    const stepKey = `${currentStepIndex}_${currentStep.type}_${currentStep.message?.substring(0, 50)}`;
-    if (aiGuides[stepKey]) return;
-
-    // Generate AI guide
-    const generateGuide = async () => {
-      setLoadingGuide(true);
-      setGuideError(null);
-
+    /** 缺失或无效的已有引导先尝试生成，失败后才使用默认引导。 */
+    async function generateGuide() {
+      setGuideRequest({ key: stepKey, status: "loading", error: null });
+      let errorMessage = null;
       try {
         const response = await fetch("/api/generate-coaction", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            stepType: currentStep.type,
-            stepMessage: currentStep.message || "",
-            storyTitle: title,
-            childContext: templateContext,
-          }),
+          body: guideRequestBody,
+          signal,
         });
-
-        if (!response.ok) {
-          const errorData = await response.json();
-          
-          // If quota is exhausted, silently fall back to default prompts
-          if (errorData.quotaExhausted || errorData.error === "Quota exhausted") {
-            console.warn("AI co-action quota exhausted, using default prompts");
-            return; // Don't throw error, just use fallback
-          }
-          
-          throw new Error(errorData.message || "Failed to generate guide");
-        }
-
+        if (!response.ok) throw new Error("AI guidance is unavailable. Default guidance is being used.");
         const data = await response.json();
-        if (data.guide) {
-          setAiGuides((prev) => ({
-            ...prev,
-            [stepKey]: data.guide,
-          }));
+        if (!isValidParentGuide(data?.guide)) {
+          throw new Error("AI returned invalid guidance. Default guidance is being used.");
         }
-      } catch (error) {
-        console.error("Error generating co-action guide:", error);
-        // Only show error for non-quota issues
-        if (!error.message?.includes("quota") && !error.message?.includes("Quota")) {
-          setGuideError(error.message);
-        }
+        if (!active) return;
+        // 只缓存经过验证的约定字段，不信任模型返回的额外数据。
+        const { title, description, coActionPrompt } = data.guide;
+        setAiGuides((prev) => ({ ...prev, [stepKey]: { title, description, coActionPrompt } }));
+      } catch {
+        if (!active) return;
+        errorMessage = signal.aborted
+          ? "AI guidance timed out. Default guidance is being used."
+          : "AI guidance could not be generated. Default guidance is being used.";
       } finally {
-        setLoadingGuide(false);
+        // 切换步骤或关闭播放器后，旧请求不得覆盖当前步骤状态。
+        if (active) setGuideRequest({ key: stepKey, status: "finished", error: errorMessage });
       }
-    };
+    }
 
     generateGuide();
-  }, [currentStep, currentStepIndex, aiGuides, title, templateContext]);
+    return () => {
+      active = false;
+      controller.abort();
+    };
+  }, [currentStep, cachedGuide, stepKey, guideRequestBody]);
 
   // Get parent guide content (AI-generated or fallback)
   const parentGuide = useMemo(() => {
     if (!currentStep) return null;
 
     // Check if step has custom parent guide
-    if (currentStep.parentGuide) {
+    if (isValidParentGuide(currentStep.parentGuide)) {
       return currentStep.parentGuide;
     }
 
     // Check for AI-generated guide
-    const stepKey = `${currentStepIndex}_${currentStep.type}_${currentStep.message?.substring(0, 50)}`;
-    if (aiGuides[stepKey]) {
-      return aiGuides[stepKey];
+    if (isValidParentGuide(cachedGuide)) {
+      return cachedGuide;
     }
 
     // Show loading state
@@ -471,7 +462,7 @@ export default function StoryPlayer({
       };
     }
     return null;
-  }, [currentStep, currentStepIndex, aiGuides, loadingGuide]);
+  }, [currentStep, cachedGuide, loadingGuide]);
 
   /** @module 绘本内容展示 */
   function renderStoryContent(step, isPrintPage = false) {
@@ -1258,7 +1249,7 @@ export default function StoryPlayer({
                 </svg>
                 Parent Guide
               </span>
-              {!currentStep?.parentGuide && !loadingGuide && parentGuide.coActionPrompt && (
+              {!isValidParentGuide(currentStep?.parentGuide) && isValidParentGuide(cachedGuide) && !loadingGuide && (
                 <span className="text-purple-600 flex items-center gap-1" title="AI-generated guidance">
                   <Sparkles className="w-3 h-3" />
                 </span>

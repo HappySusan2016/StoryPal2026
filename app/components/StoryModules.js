@@ -276,12 +276,15 @@ export default function StoryModules({
     };
   }
 
+  /** @module AI 步骤生成与失败提示 */
   async function generateStepsFromStages() {
     setAiError("");
     if (aiRetryAt && Date.now() < aiRetryAt) return;
     setAiGenerating(true);
     try {
       const res = await fetch("/api/generate-steps", {
+        // 客户端比服务端多留 10 秒传输时间，避免按钮一直处于禁用状态。
+        signal: AbortSignal.timeout(60000),
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -300,7 +303,7 @@ export default function StoryModules({
       if (!res.ok) {
         if (res.status === 429) {
           const retrySeconds =
-            typeof data?.retryAfterSeconds === "number"
+            Number.isFinite(data?.retryAfterSeconds)
               ? data.retryAfterSeconds
               : 30;
           const until = Date.now() + Math.max(1, retrySeconds) * 1000;
@@ -310,7 +313,14 @@ export default function StoryModules({
             `Rate limited. Try again in ${Math.max(1, retrySeconds)}s.`
           );
         }
-        throw new Error(data?.error || "Failed to generate steps.");
+        const reason = res.status === 504
+          ? "AI generation timed out. Please try again."
+          : res.status === 502
+          ? "AI returned an invalid result. Please try again."
+          : res.status === 400
+          ? "AI service is not configured. Please contact the administrator."
+          : "AI service is unavailable. Please try again later.";
+        throw new Error(reason);
       }
 
       const incomingStep =
@@ -358,7 +368,13 @@ export default function StoryModules({
         ];
       });
     } catch (e) {
-      setAiError(e?.message || "Failed to generate steps.");
+      // 超时、网络异常和业务失败均显示原因，并由 finally 恢复操作。
+      const reason = e?.name === "TimeoutError" || e?.name === "AbortError"
+        ? "Request timed out. Please try again."
+        : e instanceof TypeError
+        ? "Network connection failed. Check your connection and try again."
+        : e?.message || "Please try again.";
+      setAiError(`AI generation failed: ${reason}`);
     } finally {
       setAiGenerating(false);
     }
@@ -1016,8 +1032,6 @@ export default function StoryModules({
               ))}
             </ol>
 
-            {saving && <p role="status" className="mb-4 text-sm text-zinc-700">Generating parent guides and saving story. Please wait…</p>}
-
             <div className="flex items-center gap-3 pt-2">
               <button
                 type="button"
@@ -1414,7 +1428,7 @@ export default function StoryModules({
               <Sparkles className="inline-block w-4 h-4 mb-1" />
             </button>
             {aiError ? (
-              <span className="text-sm text-red-700">{aiError}</span>
+              <span role="alert" className="text-sm text-red-700">{aiError}</span>
             ) : null}
           </div>
         </div>

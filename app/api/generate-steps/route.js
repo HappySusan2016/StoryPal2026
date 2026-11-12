@@ -3,11 +3,11 @@ import { candidateModels, fetchGemini } from "@/app/lib/gemini";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-async function listModels(apiKey) {
+async function listModels(apiKey, signal) {
   const resp = await fetchGemini(
     "models",
     apiKey,
-    { method: "GET" }
+    { method: "GET", signal }
   );
   if (!resp.ok) return [];
   const data = await resp.json().catch(() => ({}));
@@ -103,11 +103,12 @@ function normalizeOneStep(rawStep) {
   return step;
 }
 
-async function callGemini({ apiKey, modelName, payload }) {
+async function callGemini({ apiKey, modelName, payload, signal }) {
   const resp = await fetchGemini(
     `${modelName}:generateContent`,
     apiKey,
     {
+      signal,
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
@@ -169,7 +170,11 @@ function tryParseJsonFromText(text) {
   }
 }
 
+/** @module 步骤生成请求时限 */
 export async function POST(req) {
+  // 所有模型尝试和格式修复共用 50 秒预算，客户端断开时同步取消。
+  const timeoutSignal = AbortSignal.timeout(50000);
+  const signal = AbortSignal.any([req.signal, timeoutSignal]);
   try {
     const apiKey = process.env.GEMINI_API_KEY;
     if (!apiKey) {
@@ -283,13 +288,12 @@ previousSteps: ${JSON.stringify(previousSteps)}
       },
     };
 
-    let lastErrText = "";
     let chosenModel = null;
     let data = null;
 
     // 1) Try known model IDs first
     for (const m of candidateModels) {
-      const r = await callGemini({ apiKey, modelName: m, payload });
+      const r = await callGemini({ apiKey, modelName: m, payload, signal });
       if (r.ok) {
         chosenModel = m;
         data = r.json;
@@ -310,21 +314,18 @@ previousSteps: ${JSON.stringify(previousSteps)}
           }
         );
       }
-      lastErrText = r.text || lastErrText;
       // if it's not found, keep trying; otherwise also keep trying
     }
 
     // 2) Auto-discover if all failed
     if (!data) {
-      const models = await listModels(apiKey);
+      const models = await listModels(apiKey, signal);
       const picked = pickModelFromList(models);
       if (picked) {
-        const r = await callGemini({ apiKey, modelName: picked, payload });
+        const r = await callGemini({ apiKey, modelName: picked, payload, signal });
         if (r.ok) {
           chosenModel = picked;
           data = r.json;
-        } else {
-          lastErrText = r.text || lastErrText;
         }
       }
     }
@@ -333,11 +334,9 @@ previousSteps: ${JSON.stringify(previousSteps)}
       return Response.json(
         {
           error:
-            `Gemini request failed. ` +
-            `Tried: ${candidateModels.join(", ")}. ` +
-            `Last error: ${lastErrText || "unknown"}`,
+            "AI service could not generate a step. Please try again later.",
         },
-        { status: 502 }
+        { status: 503 }
       );
     }
 
@@ -398,6 +397,7 @@ previousSteps: ${JSON.stringify(previousSteps)}
         apiKey,
         modelName: repairModel,
         payload: repairPayload,
+        signal,
       });
 
       if (repaired.ok) {
@@ -429,9 +429,13 @@ previousSteps: ${JSON.stringify(previousSteps)}
 
     return Response.json({ title, step, model: chosenModel }, { status: 200 });
   } catch (err) {
+    // 对外只返回简短原因，避免将上游错误正文暴露给页面。
+    console.error("Step generation failed", { name: err?.name });
     return Response.json(
-      { error: err?.message || "Unexpected error generating steps." },
-      { status: 500 }
+      { error: timeoutSignal.aborted
+        ? "AI generation timed out. Please try again."
+        : "Unable to connect to the AI service. Please try again." },
+      { status: timeoutSignal.aborted ? 504 : 503 }
     );
   }
 }

@@ -19,7 +19,7 @@ export function hasGuideContentChanged(step, initialStep) {
 }
 
 /** 复用现有 Gemini 接口，确认保存部分结果或仅重试失败项。 */
-export async function generateModuleGuides(moduleDefinition, initialSteps, childContext) {
+export async function generateModuleGuides(moduleDefinition, initialSteps, childContext, { onProgress, onFailure } = {}) {
   const initialById = new Map(initialSteps.map((step) => [step.id, step]));
   const steps = moduleDefinition.steps.map((step) => {
     const initialStep = initialById.get(step.id);
@@ -31,10 +31,15 @@ export async function generateModuleGuides(moduleDefinition, initialSteps, child
   let pending = steps.map((step, index) => index).filter((index) => !steps[index].parentGuide);
 
   while (pending.length) {
+    // 每轮重试共享一分钟预算，避免步骤数放大保存等待时间。
+    const batchSignal = AbortSignal.timeout(60000);
     const failed = [];
+    let completed = steps.length - pending.length;
+    onProgress?.({ completed, total: steps.length });
     for (const index of pending) {
       const step = steps[index];
       try {
+        batchSignal.throwIfAborted();
         const response = await fetch("/api/generate-coaction", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -44,7 +49,7 @@ export async function generateModuleGuides(moduleDefinition, initialSteps, child
             storyTitle: moduleDefinition.title,
             childContext,
           }),
-          signal: AbortSignal.timeout(60000),
+          signal: batchSignal,
         });
         if (!response.ok) throw new Error(`Guide generation failed: ${response.status}`);
         const { guide } = await response.json();
@@ -56,15 +61,18 @@ export async function generateModuleGuides(moduleDefinition, initialSteps, child
           coActionPrompt: guide.coActionPrompt,
         };
       } catch (error) {
-        console.warn(`Parent guide generation failed for step ${index + 1}`, error);
+        console.warn(`Parent guide generation failed for step ${index + 1}`, { name: error?.name });
         failed.push(index);
       }
+      completed += 1;
+      onProgress?.({ completed, total: steps.length });
     }
     if (!failed.length) break;
-    // 原生确认框提供键盘操作；取消明确表示重试，而非丢弃编辑内容。
-    const savePartial = window.confirm(
-      `Parent guides could not be generated for steps ${failed.map((index) => index + 1).join(", ")}.\n\nOK: Save the story with the available guides.\nCancel: Retry only the failed guides.`
-    );
+    // 由页面展示明确操作；保留成功结果，只重试未生成的步骤。
+    const savePartial = await onFailure({
+      failedSteps: failed.map((index) => index + 1),
+      timedOut: batchSignal.aborted,
+    });
     if (savePartial) break;
     pending = failed;
   }

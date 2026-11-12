@@ -20,6 +20,7 @@ import {
 } from "firebase/firestore";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import { faPassport } from "@fortawesome/free-solid-svg-icons";
+import { AlertTriangle, Check, LoaderCircle, RotateCcw } from "lucide-react";
 import { generateModuleGuides } from "../lib/parentGuides";
 
 const STORAGE_KEY = "storypal.modules";
@@ -614,6 +615,26 @@ export default function ParentPortal() {
   /** @module 保存时生成父母引导 */
   const [savingModule, setSavingModule] = useState(false);
   const savingModuleRef = useRef(false);
+  const [guideProgress, setGuideProgress] = useState(null);
+  const [guideFailure, setGuideFailure] = useState(null);
+  const guideDecisionRef = useRef(null);
+
+  /** 展示失败步骤，等待用户保存已有结果或重试失败项。 */
+  function handleGuideFailure(failure) {
+    setGuideFailure(failure);
+    return new Promise((resolve) => {
+      guideDecisionRef.current = resolve;
+    });
+  }
+
+  /** @module 引导生成失败选择 */
+  function handleGuideDecision(savePartial) {
+    const resolve = guideDecisionRef.current;
+    guideDecisionRef.current = null;
+    setGuideFailure(null);
+    resolve?.(savePartial);
+  }
+
 
   async function handleModuleSave(moduleDefinition, initialSteps) {
     if (savingModuleRef.current) return;
@@ -624,7 +645,8 @@ export default function ParentPortal() {
       const steps = await generateModuleGuides(
         moduleDefinition,
         editingModuleId ? initialSteps : [],
-        passport ? buildContextFromPassport(passport) : {}
+        passport ? buildContextFromPassport(passport) : {},
+        { onProgress: setGuideProgress, onFailure: handleGuideFailure }
       );
       await persistModule({ ...moduleDefinition, steps });
     } catch (error) {
@@ -633,6 +655,8 @@ export default function ParentPortal() {
     } finally {
       savingModuleRef.current = false;
       setSavingModule(false);
+      setGuideProgress(null);
+      setGuideFailure(null);
     }
   }
 
@@ -1392,7 +1416,81 @@ export default function ParentPortal() {
                 {t("close")}
               </button>
             </div>
-            <div className="px-6 pb-6 overflow-y-auto max-h-[calc(90vh-80px)]">
+            <div className="px-6 pb-6 overflow-y-auto max-h-[calc(90vh-80px)] relative">
+              {savingModule && (
+                <div className={`sticky top-0 z-10 mb-5 rounded-2xl border p-4 shadow-sm sm:p-5 ${guideFailure ? "border-amber-200 bg-amber-50" : "border-purple-200 bg-purple-50"}`}>
+                  <div className="flex items-start gap-3 sm:gap-4">
+                    <div className={`flex size-10 shrink-0 items-center justify-center rounded-xl border bg-white ${guideFailure ? "border-amber-200 text-amber-700" : "border-purple-200 text-[#5b217f]"}`}>
+                      {guideFailure ? (
+                        <AlertTriangle className="size-5" aria-hidden="true" />
+                      ) : (
+                        <LoaderCircle className="size-5 motion-safe:animate-spin" aria-hidden="true" />
+                      )}
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      {guideFailure ? (
+                        <>
+                          <div role="alert" className="space-y-1">
+                            <h3 className="text-sm font-semibold leading-6 text-amber-950">
+                              {guideFailure.timedOut ? "Guide generation timed out." : "Some parent guides could not be generated."}
+                            </h3>
+                            <p className="text-sm leading-6 text-amber-900">
+                              Your edits and successful guides are retained.
+                            </p>
+                            <p className="flex flex-wrap items-center gap-2 pt-2 text-xs font-medium text-amber-900">
+                              <span>Steps to retry:</span>
+                              {guideFailure.failedSteps.map((step) => (
+                                <span key={step} className="inline-flex min-w-7 items-center justify-center rounded-lg border border-amber-200 bg-white px-2 py-1 tabular-nums">
+                                  {step}
+                                </span>
+                              ))}
+                            </p>
+                          </div>
+                          <div className="mt-4 flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:gap-3">
+                            <button
+                              type="button"
+                              onClick={() => handleGuideDecision(true)}
+                              className="inline-flex min-h-11 cursor-pointer items-center justify-center gap-2 rounded-xl bg-[#5b217f] px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition-colors duration-200 hover:bg-[#7c2da3] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-purple-700"
+                            >
+                              <Check className="size-4" aria-hidden="true" />
+                              保存已有结果
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleGuideDecision(false)}
+                              className="inline-flex min-h-11 cursor-pointer items-center justify-center gap-2 rounded-xl border border-amber-300 bg-white px-4 py-2.5 text-sm font-semibold text-amber-950 transition-colors duration-200 hover:border-amber-400 hover:bg-amber-100 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-amber-700"
+                            >
+                              <RotateCcw className="size-4" aria-hidden="true" />
+                              重试失败项
+                            </button>
+                          </div>
+                        </>
+                      ) : (
+                        <>
+                          <div role="status" aria-atomic="true" className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1">
+                            <h3 className="text-sm font-semibold leading-6 text-[#5b217f]">
+                              {guideProgress ? "Processing parent guides" : "Preparing parent guides…"}
+                            </h3>
+                            {guideProgress && (
+                              <span className="rounded-lg border border-purple-200 bg-white px-2.5 py-1 text-xs font-semibold tabular-nums text-[#5b217f]">
+                                {guideProgress.completed} / {guideProgress.total}
+                              </span>
+                            )}
+                          </div>
+                          {guideProgress && guideProgress.total > 0 && (
+                            <progress
+                              aria-label="Parent guide processing progress"
+                              value={guideProgress.completed}
+                              max={guideProgress.total}
+                              className="mt-3 block h-2 w-full overflow-hidden rounded-full border-0 bg-purple-100 [&::-webkit-progress-bar]:rounded-full [&::-webkit-progress-bar]:bg-purple-100 [&::-webkit-progress-value]:rounded-full [&::-webkit-progress-value]:bg-[#5b217f] [&::-moz-progress-bar]:rounded-full [&::-moz-progress-bar]:bg-[#5b217f]"
+                            />
+                          )}
+                        </>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              )}
               <StoryModules
                 passports={passports}
                 onSave={handleModuleSave}

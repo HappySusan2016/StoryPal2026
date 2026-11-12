@@ -1,8 +1,13 @@
 import { candidateModels, fetchGemini } from "@/app/lib/gemini";
+import { isValidParentGuide } from "@/app/lib/parentGuides";
 
 export const runtime = "nodejs";
 
+/** @module 引导生成与响应校验 */
 export async function POST(req) {
+  // 所有候选模型共享时限，并响应客户端取消，避免后台继续生成。
+  const timeoutSignal = AbortSignal.timeout(50000);
+  const signal = AbortSignal.any([req.signal, timeoutSignal]);
   try {
     const { stepType, stepMessage, storyTitle, childContext } = await req.json();
 
@@ -99,6 +104,7 @@ Generate a co-action prompt for this story step.`;
           `${modelName}:generateContent`,
           apiKey,
           {
+            signal,
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify(payload),
@@ -119,9 +125,9 @@ Generate a co-action prompt for this story step.`;
         for (const part of parts) {
           if (part.functionCall?.name === "return_coaction_guide") {
             const guide = part.functionCall.args;
-            if (guide.title && guide.description && guide.coActionPrompt) {
+            if (isValidParentGuide(guide)) {
               return Response.json({
-                guide,
+                guide: { title: guide.title, description: guide.description, coActionPrompt: guide.coActionPrompt },
                 model: modelName,
               });
             }
@@ -131,6 +137,7 @@ Generate a co-action prompt for this story step.`;
         // If we got here, no valid function call was found
         lastError = { message: "No valid function call in response" };
       } catch (error) {
+        if (signal.aborted) throw error;
         console.error(`Model ${modelName} failed:`, error.message);
         
         // Check for rate limit (429)
@@ -184,10 +191,10 @@ Generate a co-action prompt for this story step.`;
       { status: 500 }
     );
   } catch (error) {
-    console.error("Co-action generation error:", error);
+    console.error("Co-action generation error:", { name: error?.name });
     return Response.json(
-      { error: "Failed to generate co-action prompt", details: error.message },
-      { status: 500 }
+      { error: timeoutSignal.aborted ? "AI guidance timed out" : "Failed to generate co-action prompt" },
+      { status: timeoutSignal.aborted ? 504 : 500 }
     );
   }
 }
