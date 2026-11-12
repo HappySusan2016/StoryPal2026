@@ -142,6 +142,7 @@ export default function StoryModules({
   onSave,
   onPreview,
   initialData,
+  saving = false,
 }) {
   const { t } = useTranslation();
   const [aiGenerating, setAiGenerating] = useState(false);
@@ -154,9 +155,12 @@ export default function StoryModules({
   const [selectedPassportId, setSelectedPassportId] = useState(
     initialData?.childId || ""
   );
-  const [steps, setSteps] = useState(
-    Array.isArray(initialData?.steps) ? ensureStepIds(initialData.steps) : []
-  );
+  /** @module 编辑初始快照 */
+  const initialStepsRef = useRef(null);
+  if (initialStepsRef.current === null) {
+    initialStepsRef.current = ensureStepIds(initialData?.steps || []);
+  }
+  const [steps, setSteps] = useState(initialStepsRef.current);
   const [editingId, setEditingId] = useState(initialData?.id || null);
   const [activeStage, setActiveStage] = useState(1);
   const [sceneFont, setSceneFont] = useState(
@@ -198,9 +202,9 @@ export default function StoryModules({
       setTitle(initialData.title || "");
       setCoverImage(initialData.coverImage || "");
       setSelectedPassportId(initialData.childId || "");
-      setSteps(
-        Array.isArray(initialData.steps) ? ensureStepIds(initialData.steps) : []
-      );
+      const initialSteps = ensureStepIds(initialData.steps || []);
+      initialStepsRef.current = initialSteps;
+      setSteps(initialSteps);
       setEditingId(initialData.id || null);
       setSceneFont(initialData.fontPreset || "classic");
       setStageFraming(
@@ -493,7 +497,7 @@ export default function StoryModules({
       fontPreset: sceneFont || "classic",
     };
     if (!validateModule(moduleDefinition)) return;
-    onSave(moduleDefinition);
+    onSave(moduleDefinition, initialStepsRef.current);
   };
 
   const handlePreview = () => {
@@ -501,7 +505,8 @@ export default function StoryModules({
   };
 
   return (
-    <section className="mt-12">
+    <section className="mt-12" aria-busy={saving}>
+      <fieldset disabled={saving} inert={saving} className="min-w-0">
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <div className="rounded-2xl bg-white/80 backdrop-blur p-5 shadow-sm">
           <div className="space-y-4">
@@ -1011,6 +1016,8 @@ export default function StoryModules({
               ))}
             </ol>
 
+            {saving && <p role="status" className="mb-4 text-sm text-zinc-700">Generating parent guides and saving story. Please wait…</p>}
+
             <div className="flex items-center gap-3 pt-2">
               <button
                 type="button"
@@ -1024,7 +1031,7 @@ export default function StoryModules({
               <button
                 type="button"
                 onClick={handleSave}
-                disabled={!isValid}
+                disabled={!isValid || aiGenerating || saving}
                 data-telemetry={
                   editingId ? "parent_story_update" : "parent_story_save"
                 }
@@ -1412,6 +1419,7 @@ export default function StoryModules({
           </div>
         </div>
       </div>
+      </fieldset>
     </section>
   );
 }

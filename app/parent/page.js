@@ -20,6 +20,7 @@ import {
 } from "firebase/firestore";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import { faPassport } from "@fortawesome/free-solid-svg-icons";
+import { generateModuleGuides } from "../lib/parentGuides";
 
 const STORAGE_KEY = "storypal.modules";
 const PASSPORTS_KEY = "storypal.passports";
@@ -610,13 +611,41 @@ export default function ParentPortal() {
     }
   }
 
-  async function handleModuleSave(moduleDefinition) {
+  /** @module 保存时生成父母引导 */
+  const [savingModule, setSavingModule] = useState(false);
+  const savingModuleRef = useRef(false);
+
+  async function handleModuleSave(moduleDefinition, initialSteps) {
+    if (savingModuleRef.current) return;
+    savingModuleRef.current = true;
+    setSavingModule(true);
+    try {
+      const passport = passports.find((item) => item.id === moduleDefinition.childId);
+      const steps = await generateModuleGuides(
+        moduleDefinition,
+        editingModuleId ? initialSteps : [],
+        passport ? buildContextFromPassport(passport) : {}
+      );
+      await persistModule({ ...moduleDefinition, steps });
+    } catch (error) {
+      console.error("Failed to save story", error);
+      window.alert("Story could not be saved. Your edits are still available. Please try again.");
+    } finally {
+      savingModuleRef.current = false;
+      setSavingModule(false);
+    }
+  }
+
+  async function persistModule(moduleDefinition) {
     const uid = currentUser?.uid;
     const moduleWithMeta = {
       ...moduleDefinition,
       createdAt: moduleDefinition.createdAt || new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     };
+
+    // console.log(moduleWithMeta)
+    // return
     const next = [...modules];
     const existingIdx = next.findIndex((m) => m.id === moduleWithMeta.id);
     if (existingIdx >= 0) {
@@ -672,6 +701,7 @@ export default function ParentPortal() {
   }
 
   function closeStoryBuilder() {
+    if (savingModuleRef.current) return;
     setShowStoryBuilder(false);
     setEditingModuleId(null);
   }
@@ -1355,8 +1385,9 @@ export default function ParentPortal() {
               <button
                 type="button"
                 onClick={closeStoryBuilder}
+                disabled={savingModule}
                 data-telemetry="parent_story_builder_close"
-                className="rounded-xl px-4 py-2 bg-zinc-100 hover:bg-zinc-200 text-zinc-900"
+                className="rounded-xl px-4 py-2 bg-zinc-100 hover:bg-zinc-200 text-zinc-900 disabled:opacity-50"
               >
                 {t("close")}
               </button>
@@ -1365,6 +1396,7 @@ export default function ParentPortal() {
               <StoryModules
                 passports={passports}
                 onSave={handleModuleSave}
+                saving={savingModule}
                 onPreview={handleModulePreview}
                 initialData={
                   editingModuleId
