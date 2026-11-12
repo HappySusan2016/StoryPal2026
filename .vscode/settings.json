@@ -1,0 +1,12 @@
+{
+  "i18n-ally.localesPaths": [".vscode/i18n"],
+  "i18n-ally.pathMatcher": "{locale}.js",
+  "i18n-ally.enabledParsers": ["js"],
+  "i18n-ally.enabledFrameworks": ["custom"],
+  "i18n-ally.sourceLanguage": "zh",
+  "i18n-ally.displayLanguage": "zh",
+  "i18n-ally.namespace": false,
+  "i18n-ally.readonly": true,
+  "i18n-ally.annotations": true,
+  "i18n-ally.annotationInPlace": false
+}

@@ -1,0 +1,10 @@
+# 识别自定义 Hook 返回的 t，只匹配静态字符串参数。
+languageIds:
+  - javascript
+  - javascriptreact
+  - typescript
+  - typescriptreact
+usageMatchRegex:
+  - "(?<![\\w$.])t\\s*\\(\\s*\"([^\"\\r\\n]+)\"\\s*\\)"
+  - "(?<![\\w$.])t\\s*\\(\\s*'([^'\\r\\n]+)'\\s*\\)"
+monopoly: true
