@@ -11,9 +11,9 @@ export const candidateModels = [
   "models/gemini-1.5-pro-002",
 ];
 
-// 与参考项目保持一致，代理地址指向本机代理服务。
-const proxyAgent = process.env.NODE_ENV === "development"
-  ? new ProxyAgent("http://127.0.0.1:7890")
+// 仅开发环境且配置了代理地址时启用，未配置则直连。
+const proxyAgent = process.env.NODE_ENV === "development" && process.env.DEV_PROXY_URL
+  ? new ProxyAgent(process.env.DEV_PROXY_URL)
   : null;
 
 /** 向 Gemini API 发送请求；生产环境使用原生 fetch 直连。 */

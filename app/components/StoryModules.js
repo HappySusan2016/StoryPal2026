@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useMemo, useEffect, useRef } from "react";
+import { auth } from "../lib/firebaseClient";
 import { Sparkles } from "lucide-react";
 import { useTranslation } from "../hooks/useTranslation";
 
@@ -282,11 +283,14 @@ export default function StoryModules({
     if (aiRetryAt && Date.now() < aiRetryAt) return;
     setAiGenerating(true);
     try {
+      const user = auth.currentUser;
+      if (!user) throw new Error("Please sign in to generate a step.");
+      const token = await user.getIdToken();
       const res = await fetch("/api/generate-steps", {
         // 客户端比服务端多留 10 秒传输时间，避免按钮一直处于禁用状态。
         signal: AbortSignal.timeout(60000),
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
         body: JSON.stringify({
           stages: buildStageContext(),
           currentTitle: title || "",
@@ -301,6 +305,10 @@ export default function StoryModules({
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
+        if (res.status === 401) throw new Error("Please sign in again.");
+        if (data.code === "STEP_QUOTA_EXCEEDED") {
+          throw new Error(`Daily AI quota (${data.limit}) is used or temporarily reserved. Try again later. Resets at ${new Intl.DateTimeFormat("en-US", { timeZone: "America/Chicago", dateStyle: "medium", timeStyle: "long" }).format(new Date(data.resetAt))} (US Central).`);
+        }
         if (res.status === 429) {
           const retrySeconds =
             Number.isFinite(data?.retryAfterSeconds)

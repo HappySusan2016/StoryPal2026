@@ -1,5 +1,7 @@
 import { candidateModels, fetchGemini } from "@/app/lib/gemini";
 
+import { reserveStepQuota, settleStepQuota } from "@/app/lib/stepQuota";
+
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
@@ -175,6 +177,8 @@ export async function POST(req) {
   // 所有模型尝试和格式修复共用 50 秒预算，客户端断开时同步取消。
   const timeoutSignal = AbortSignal.timeout(50000);
   const signal = AbortSignal.any([req.signal, timeoutSignal]);
+  let quota = null;
+  let quotaSettled = false;
   try {
     const apiKey = process.env.GEMINI_API_KEY;
     if (!apiKey) {
@@ -188,6 +192,8 @@ export async function POST(req) {
     }
 
     const body = await req.json().catch(() => ({}));
+    quota = await reserveStepQuota(req);
+    signal.throwIfAborted();
     const stages = body?.stages || {};
     const currentTitle = isNonEmptyString(body?.currentTitle)
       ? String(body.currentTitle).trim()
@@ -427,16 +433,35 @@ previousSteps: ${JSON.stringify(previousSteps)}
 
     const title = isNonEmptyString(parsed?.title) ? String(parsed.title).trim() : null;
 
-    return Response.json({ title, step, model: chosenModel }, { status: 200 });
+    signal.throwIfAborted();
+    const usage = await settleStepQuota(quota, true);
+    quotaSettled = true;
+    return Response.json({ title, step, model: chosenModel, usage }, { status: 200 });
   } catch (err) {
+    if (err?.code === "UNAUTHORIZED" || err?.code === "STEP_QUOTA_EXCEEDED") {
+      return Response.json({ error: err.message, code: err.code, limit: err.limit,
+        resetAt: err.resetAt, retryAfterSeconds: err.retryAfterSeconds }, {
+        status: err.status,
+        headers: err.retryAfterSeconds ? { "Retry-After": String(err.retryAfterSeconds) } : {},
+      });
+    }
     // 对外只返回简短原因，避免将上游错误正文暴露给页面。
-    console.error("Step generation failed", { name: err?.name });
+    console.error("Step generation failed", { message: err });
     return Response.json(
       { error: timeoutSignal.aborted
         ? "AI generation timed out. Please try again."
         : "Unable to connect to the AI service. Please try again." },
       { status: timeoutSignal.aborted ? 504 : 503 }
     );
+  } finally {
+    if (quota && !quotaSettled) {
+      try {
+        await settleStepQuota(quota, false);
+      } catch (error) {
+        // 释放失败时由预占时限兜底，不把失败请求记入成功次数。
+        console.error("Failed to release step quota", { code: error?.code });
+      }
+    }
   }
 }
 

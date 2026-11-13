@@ -15,6 +15,8 @@
     "@google/generative-ai": "^0.24.1",
     "baseline-browser-mapping": "^2.8.32",
     "firebase": "^12.6.0",
+    "firebase-admin": "^14.5.1",
+    "https-proxy-agent": "^7.0.6",
     "lucide-react": "^0.555.0",
     "next": "^16.0.10",
     "react": "19.2.0",
