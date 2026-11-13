@@ -4,7 +4,7 @@ import { getAdminApp } from "./firebaseAdmin";
 import { getAuth } from "firebase-admin/auth";
 import { FieldValue, getFirestore } from "firebase-admin/firestore";
 
-// 美国中部按芝加哥时区计算，自动适配 CST/CDT，不能使用固定 UTC 偏移。
+// 美国中部按芝加哥时区计算，自动适配 CST/CDT
 const quotaDateFormatter = new Intl.DateTimeFormat("en-US", {
   timeZone: "America/Chicago",
   year: "numeric", month: "2-digit", day: "2-digit",
