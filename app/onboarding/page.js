@@ -1,5 +1,6 @@
 "use client";
 
+import { useTranslation } from "../hooks/useTranslation";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import NavLinks from "../components/NavLinks";
@@ -8,6 +9,7 @@ const USER_KEY = "sp.userName";
 const DOCTOR_KEY = "sp.doctorName";
 
 export default function OnboardingPage() {
+  const { t } = useTranslation();
   const router = useRouter();
   const [step, setStep] = useState(1);
   const [userName, setUserName] = useState("");
@@ -26,27 +28,25 @@ export default function OnboardingPage() {
   }
 
   return (
-    <div className="min-h-screen bg-background px-6 py-8">
+    <div className="storypal-legacy min-h-screen bg-background px-6 py-8">
       <div className="max-w-3xl mx-auto">
         <div className="flex items-center justify-between mb-6">
-          <h1 className="text-4xl font-semibold text-zinc-900">Onboarding</h1>
+          <h1 className="text-4xl font-semibold text-zinc-900">{t("Onboarding")}</h1>
           <NavLinks />
         </div>
 
         <main className="w-full p-6 rounded-2xl bg-white/80 backdrop-blur shadow-sm">
           <div className="space-y-6">
-            <p className="text-zinc-700">Let’s get to know you.</p>
+            <p className="text-zinc-700">{t("Let’s get to know you.")}</p>
             {step === 1 && (
               <>
                 <div>
-                  <label htmlFor="userName" className="block text-sm text-zinc-700">
-                    Your name
-                  </label>
+                  <label htmlFor="userName" className="block text-sm text-zinc-700">{t("Your name")}</label>
                   <input
                     id="userName"
                     name="userName"
                     type="text"
-                    placeholder="Your name"
+                    placeholder={t("Your name")}
                     value={userName}
                     onChange={(e) => setUserName(e.target.value)}
                     onKeyDown={(e) => {
@@ -61,23 +61,19 @@ export default function OnboardingPage() {
                   type="button"
                   onClick={goToStep2}
                   disabled={!userName.trim()}
-                  className="rounded-xl px-5 py-3 bg-blue-500 text-white hover:bg-blue-600 disabled:opacity-50"
-                >
-                  Next
-                </button>
+                  className="rounded-xl px-5 py-3 bg-[#315e4a] text-white hover:bg-[#244a39] disabled:opacity-50"
+                >{t("Next")}</button>
               </>
             )}
             {step === 2 && (
               <>
                 <div>
-                  <label htmlFor="doctorName" className="block text-sm text-zinc-700">
-                    Doctor's name
-                  </label>
+                  <label htmlFor="doctorName" className="block text-sm text-zinc-700">{t("Doctor's name")}</label>
                   <input
                     id="doctorName"
                     name="doctorName"
                     type="text"
-                    placeholder="Doctor's name"
+                    placeholder={t("Doctor's name")}
                     value={doctorName}
                     onChange={(e) => setDoctorName(e.target.value)}
                     onKeyDown={(e) => {
@@ -91,10 +87,8 @@ export default function OnboardingPage() {
                 <button
                   type="button"
                   onClick={finish}
-                  className="rounded-xl px-5 py-3 bg-blue-500 text-white hover:bg-blue-600"
-                >
-                  Save and continue
-                </button>
+                  className="rounded-xl px-5 py-3 bg-[#315e4a] text-white hover:bg-[#244a39]"
+                >{t("Save and continue")}</button>
               </>
             )}
           </div>

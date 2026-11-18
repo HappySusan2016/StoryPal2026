@@ -1,8 +1,8 @@
 @import "tailwindcss";
 
 :root {
-  --background: #f1f5f9;
-  --foreground: #171717;
+  --background: #fbf7ef;
+  --foreground: #24332d;
 }
 
 /* Increase base font size for improved readability */
@@ -29,73 +29,76 @@ html[data-ui-font="playful"] {
   --app-font: var(--font-slackey);
 }
 
-body {
-  background: var(--background);
-  color: var(--foreground);
-  line-height: 1.65;
-  font-weight: 400; /* normal weight for body text */
-  letter-spacing: 0.01em;
-}
+/* The portal root sets its own inherited values to isolate it from legacy page typography. */
+@scope (:root) to (.portal) {
+  body {
+    background: var(--background);
+    color: var(--foreground);
+    line-height: 1.65;
+    font-weight: 400; /* normal weight for body text */
+    letter-spacing: 0.01em;
+  }
 
-/* Headings inherit app font with progressive weights */
-h1 {
-  font-family: var(--app-font) !important;
-  font-weight: 800;
-  letter-spacing: -0.02em;
-}
+  /* Headings inherit app font with progressive weights */
+  h1 {
+    font-family: var(--app-font) !important;
+    font-weight: 800;
+    letter-spacing: -0.02em;
+  }
 
-h2 {
-  font-family: var(--app-font) !important;
-  font-weight: 700;
-  letter-spacing: -0.01em;
-}
+  h2 {
+    font-family: var(--app-font) !important;
+    font-weight: 700;
+    letter-spacing: -0.01em;
+  }
 
-h3 {
-  font-weight: 600;
-  letter-spacing: 0;
-}
+  h3 {
+    font-weight: 600;
+    letter-spacing: 0;
+  }
 
-/* Story player fonts are set via inline styles, no global override needed */
+  /* Story player fonts are set via inline styles, no global override needed */
 
-h4,
-h5,
-h6 {
-  font-family: var(--app-font) !important;
-  font-weight: 600;
-  letter-spacing: 0;
-}
+  h4,
+  h5,
+  h6 {
+    font-family: var(--app-font) !important;
+    font-weight: 600;
+    letter-spacing: 0;
+  }
 
-/* All elements inherit app font */
-* {
-  font-family: inherit;
-}
+  /* All elements inherit app font */
+  * {
+    font-family: inherit;
+  }
 
-/* Ensure form elements and interactive elements use app font */
-input,
-textarea,
-select,
-button,
-label,
-span,
-div,
-p,
-a {
-  font-family: inherit;
-}
+  /* Ensure form elements and interactive elements use app font */
+  input,
+  textarea,
+  select,
+  button,
+  label,
+  span,
+  div,
+  p,
+  a {
+    font-family: inherit;
+  }
 
-/* Ensure bold text and Tailwind weight utilities are visibly stronger */
-strong,
-b {
-  font-weight: 600;
-}
-.font-semibold {
-  font-weight: 600 !important;
-}
-.font-bold {
-  font-weight: 700 !important;
-}
-.font-extrabold {
-  font-weight: 800 !important;
+  /* Ensure bold text and Tailwind weight utilities are visibly stronger */
+  strong,
+  b {
+    font-weight: 600;
+  }
+  .font-semibold {
+    font-weight: 600 !important;
+  }
+  .font-bold {
+    font-weight: 700 !important;
+  }
+  .font-extrabold {
+    font-weight: 800 !important;
+  }
 }
 
 /* Simple entry animation for step transitions */
@@ -129,3 +132,19 @@ b {
     opacity: 0;
   }
 }
+
+/* Override the legacy player's reading size only when the large-text preference is selected. */
+html[data-story-text-size="large"] .story-print-copy :is(p, input, button) {
+  font-size: 1.4rem;
+}
+html[data-story-text-size="xl"] .story-print-copy :is(p, input, button) {
+  font-size: 1.7rem;
+}
+
+/* Legacy feature pages keep their Tailwind layout and use the reference project's cream and green palette. */
+.storypal-legacy { color: #24332d; }
+.storypal-legacy :is(main, section > button, .rounded-2xl) { border: 1px solid #e7e6dd; background-color: #fffefa; box-shadow: 0 16px 42px #354b3511; }
+.storypal-legacy :is(input, select, textarea) { border-color: #d4dfd1; background-color: #fffefa; }
+.storypal-legacy :focus-visible { outline: 3px solid #8aab87; outline-offset: 3px; }
+.storypal-legacy :is(h1, h2, h3) { color: #315e4a; }
+@media (max-width: 640px) { .storypal-legacy .flex { flex-wrap: wrap; gap: 12px; } }

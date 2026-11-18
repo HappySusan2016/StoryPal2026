@@ -1,35 +1,26 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useTranslation } from "../../hooks/useTranslation";
+import { useEffect, useMemo } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { SCENES, getDefaultStorySteps } from "../../lib/defaultScenes";
+import { useSceneContext } from "../../hooks/useSceneContext";
 import StoryPlayer from "../../components/StoryPlayer";
 import Link from "next/link";
 
-const USER_KEY = "sp.userName";
-const DOCTOR_KEY = "sp.doctorName";
-
 export default function PlayScenePage() {
+  const { t } = useTranslation();
   const router = useRouter();
   const params = useParams();
-  const [templateContext, setTemplateContext] = useState(null);
+  const { ready, context: templateContext } = useSceneContext();
 
   const sceneId = Number(params?.sceneId);
   const scene = SCENES.find((s) => s.id === sceneId) || null;
 
+  // Share the onboarding session with the scene list to preserve the existing return flow.
   useEffect(() => {
-    if (typeof window === "undefined") return;
-    const userName = window.sessionStorage.getItem(USER_KEY) || "";
-    const doctorName = window.sessionStorage.getItem(DOCTOR_KEY) || "";
-    if (!userName || !doctorName) {
-      router.replace("/onboarding");
-      return;
-    }
-    setTemplateContext({
-      user: { name: userName },
-      doctor: { name: doctorName },
-    });
-  }, [router]);
+    if (ready && !templateContext) router.replace("/onboarding");
+  }, [ready, templateContext, router]);
 
   const moduleDefinition = useMemo(() => {
     if (!scene) return null;
@@ -43,12 +34,10 @@ export default function PlayScenePage() {
 
   if (!scene) {
     return (
-      <div className="min-h-screen bg-background px-6 py-8">
+      <div className="storypal-legacy min-h-screen bg-background px-6 py-8">
         <div className="max-w-6xl mx-auto">
-          <h1 className="text-4xl font-semibold text-zinc-900">Scene not found</h1>
-          <Link href="/scenes" className="text-blue-600 hover:underline mt-4 inline-block">
-            Back to Scenes
-          </Link>
+          <h1 className="text-4xl font-semibold text-zinc-900">{t("Scene not found")}</h1>
+          <Link href="/scenes" className="text-[#315e4a] hover:underline mt-4 inline-block">{t("Back to Scenes")}</Link>
         </div>
       </div>
     );
@@ -56,22 +45,20 @@ export default function PlayScenePage() {
 
   if (!templateContext || !moduleDefinition) {
     return (
-      <div className="min-h-screen bg-background px-6 py-8">
+      <div className="storypal-legacy min-h-screen bg-background px-6 py-8">
         <div className="max-w-6xl mx-auto">
-          <h1 className="text-4xl font-semibold text-zinc-900">Loading…</h1>
+          <h1 className="text-4xl font-semibold text-zinc-900">{t("Loading…")}</h1>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-background px-6 py-8">
+    <div className="storypal-legacy min-h-screen bg-background px-6 py-8">
       <div className="max-w-6xl mx-auto">
         <div className="flex items-center justify-between">
           <h1 className="text-3xl font-semibold text-zinc-900">{scene.title}</h1>
-          <Link href="/scenes" className="text-blue-600 hover:underline">
-            Back to Scenes
-          </Link>
+          <Link href="/scenes" className="text-[#315e4a] hover:underline">{t("Back to Scenes")}</Link>
         </div>
       </div>
 

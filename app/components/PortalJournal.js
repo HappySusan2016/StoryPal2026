@@ -1,0 +1,256 @@
+"use client";
+
+import { useState } from "react";
+import { useTranslation } from "../hooks/useTranslation";
+import { toMillis } from "../lib/portalData";
+
+/** @module Local reflection journal */
+export default function PortalJournal({
+  modules,
+  reflections,
+  onSave,
+  onDelete,
+}) {
+  const { t, language } = useTranslation();
+  const [editing, setEditing] = useState(null);
+  function handleSave(event) {
+    event.preventDefault();
+    const data = new FormData(event.currentTarget);
+    onSave({
+      id: editing?.id,
+      storyId: data.get("storyId"),
+      childComfort: Number(data.get("childComfort")),
+      parentConfidence: Number(data.get("parentConfidence")),
+      observations: data.get("observations"),
+      successMoments: data.get("successMoments"),
+    });
+    event.currentTarget.reset();
+    setEditing(null);
+  }
+  function renderRating(name, label, low, high) {
+    return (
+      <fieldset className="rating-field">
+        <legend>{t(label)}</legend>
+        <div className="rating">
+          {[1, 2, 3, 4, 5].map((score) => (
+            <label className="rate" key={score}>
+              <input
+                type="radio"
+                name={name}
+                value={score}
+                defaultChecked={score === (editing?.[name] ?? (name === "childComfort" ? 2 : 3))}
+                required
+              />
+              <span>{score}</span>
+            </label>
+          ))}
+        </div>
+        <div className="rating-scale">
+          <span>{t(low)}</span>
+          <span>{t(high)}</span>
+        </div>
+      </fieldset>
+    );
+  }
+  return (
+    <section className="card journal" id="journal">
+      <div className="section-label">{t("FOR GROWN-UPS")}</div>
+      <h2>{t("Reflection journal")}</h2>
+      <p>
+        {t(
+          "After each story session, take a minute to note how it went. Over time this shows how comfort and confidence are growing.",
+        )}
+      </p>
+      <div className="journal-grid">
+        <div>
+          {modules.length ? (
+            <form
+              key={editing?.id || "new"}
+              className="journal-form"
+              onSubmit={handleSave}
+            >
+              <label htmlFor="journal-story">
+                {t("Which story did you practice?")}
+              </label>
+              <select
+                id="journal-story"
+                name="storyId"
+                defaultValue={editing?.storyId || ""}
+                required
+              >
+                <option value="">{t("Choose a story…")}</option>
+                {modules.map((story) => (
+                  <option key={story.id} value={story.id}>
+                    {story.title}
+                  </option>
+                ))}
+              </select>
+              <div className="rating-row">
+                {renderRating(
+                  "childComfort",
+                  "Child's comfort level",
+                  "very uneasy",
+                  "fully at ease",
+                )}
+                {renderRating(
+                  "parentConfidence",
+                  "Your confidence level",
+                  "unsure how to help",
+                  "very confident",
+                )}
+              </div>
+              <label htmlFor="observations">{t("What did you observe?")}</label>
+              <textarea
+                id="observations"
+                name="observations"
+                defaultValue={editing?.observations || ""}
+                placeholder={t(
+                  "Describe your child's reactions, engagement, behaviors...",
+                )}
+              />
+              <label htmlFor="successMoments">{t("Success moments")}</label>
+              <textarea
+                id="successMoments"
+                name="successMoments"
+                defaultValue={editing?.successMoments || ""}
+                placeholder={t(
+                  "e.g. answered a question on page 3, used the calming cue without a reminder",
+                )}
+              />
+              <button className="primary auto">
+                {t("Save reflection")} <span>→</span>
+              </button>
+              {editing && (
+                <button
+                  type="button"
+                  className="secondary"
+                  onClick={() => setEditing(null)}
+                >
+                  {t("Cancel")}
+                </button>
+              )}
+            </form>
+          ) : (
+            <p className="empty-state">
+              {t(
+                "Make a story first, then come back here after you read it together.",
+              )}
+            </p>
+          )}
+        </div>
+        <div>
+          <h3>{t("Past sessions")}</h3>
+          {reflections.length ? (
+            <>
+              <div className="journal-stats">
+                {[
+                  [reflections.length, "Sessions logged"],
+                  [
+                    (
+                      reflections.reduce(
+                        (sum, r) => sum + Number(r.childComfort || 0),
+                        0,
+                      ) / reflections.length
+                    ).toFixed(1),
+                    "Avg. comfort",
+                  ],
+                  [
+                    (
+                      reflections.reduce(
+                        (sum, r) => sum + Number(r.parentConfidence || 0),
+                        0,
+                      ) / reflections.length
+                    ).toFixed(1),
+                    "Avg. your confidence",
+                  ],
+                ].map(([value, label]) => (
+                  <div className="stat" key={label}>
+                    <b>{value}</b>
+                    <span>{t(label)}</span>
+                  </div>
+                ))}
+              </div>
+              <ul className="entries">
+                {reflections.map((entry) => (
+                  <li className="entry" key={entry.id}>
+                    <div className="entry-head">
+                      <div>
+                        <b>
+                          {modules.find((m) => m.id === entry.storyId)?.title ||
+                            t("Story")}
+                        </b>
+                        <span>
+                          {toMillis(entry.createdAt)
+                            ? new Date(
+                                toMillis(entry.createdAt),
+                              ).toLocaleDateString(language)
+                            : ""}
+                        </span>
+                      </div>
+                      <div className="entry-actions">
+                        <button
+                          className="link-btn"
+                          onClick={() => setEditing(entry)}
+                        >
+                          {t("Edit")}
+                        </button>{" "}
+                        <button
+                          className="link-btn"
+                          onClick={() => {
+                            onDelete(entry.id);
+                            if (editing?.id === entry.id) setEditing(null);
+                          }}
+                        >
+                          {t("Delete")}
+                        </button>
+                      </div>
+                    </div>
+                    <div className="entry-scores">
+                      {[
+                        ["Comfort", entry.childComfort],
+                        ["Your confidence", entry.parentConfidence],
+                      ].map(([label, value]) => (
+                        <span className="score" key={label}>
+                          <span className="k">{t(label)}</span>
+                          <span className="meter" aria-label={`${value}/5`}>
+                            {[1, 2, 3, 4, 5].map((score) => (
+                              <i
+                                key={score}
+                                className={
+                                  score <= Number(value) ? "on" : undefined
+                                }
+                              />
+                            ))}
+                          </span>
+                          <span>{value}/5</span>
+                        </span>
+                      ))}
+                    </div>
+                    {entry.observations && (
+                      <p>
+                        <span className="k">{t("Observed")}</span>
+                        {entry.observations}
+                      </p>
+                    )}
+                    {entry.successMoments && (
+                      <p>
+                        <span className="k">{t("Success moments")}</span>
+                        {entry.successMoments}
+                      </p>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            </>
+          ) : (
+            <p className="empty-state">
+              {t(
+                "No reflections yet. Your entries will appear here so you can see progress over time.",
+              )}
+            </p>
+          )}
+        </div>
+      </div>
+    </section>
+  );
+}

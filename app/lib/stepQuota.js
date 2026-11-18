@@ -1,24 +1,24 @@
-/* 服务端步骤生成额度：按账号及美国中部日期统计，通过事务预占防止并发超额。 */
+/* Track server-side step generation quotas per account and US Central calendar day. Reserve quota transactionally to prevent concurrent requests from exceeding the limit. */
 import { randomUUID } from "node:crypto";
 import { getAdminApp } from "./firebaseAdmin";
 import { getAuth } from "firebase-admin/auth";
 import { FieldValue, getFirestore } from "firebase-admin/firestore";
 
-// 美国中部按芝加哥时区计算，自动适配 CST/CDT
+// Use the Chicago time zone for US Central time to handle CST and CDT automatically.
 const quotaDateFormatter = new Intl.DateTimeFormat("en-US", {
   timeZone: "America/Chicago",
   year: "numeric", month: "2-digit", day: "2-digit",
   hour: "2-digit", minute: "2-digit", second: "2-digit", hourCycle: "h23",
 });
 
-/** 获取美国中部当日日期与次日零点，重置时间以 UTC 时间戳返回。 */
+/** Get the current US Central date and the next local midnight as a UTC reset timestamp. */
 function getStepQuotaWindow(now) {
   const parts = Object.fromEntries(quotaDateFormatter.formatToParts(now)
     .filter((part) => part.type !== "literal").map((part) => [part.type, part.value]));
   const day = `${parts.year}-${parts.month}-${parts.day}`;
   const nextMidnight = Date.UTC(Number(parts.year), Number(parts.month) - 1, Number(parts.day) + 1);
   let resetAt = nextMidnight;
-  // 将当地次日零点转换为真实时间，第二次校正覆盖夏令时偏移变化。
+  // Convert the next local midnight to an absolute time. A second correction accounts for daylight saving time changes.
   for (let attempt = 0; attempt < 2; attempt += 1) {
     const local = Object.fromEntries(quotaDateFormatter.formatToParts(resetAt)
       .filter((part) => part.type !== "literal").map((part) => [part.type, Number(part.value)]));
@@ -28,12 +28,12 @@ function getStepQuotaWindow(now) {
   return { day, resetAt };
 }
 
-/** 构造可直接映射到接口响应的额度错误。 */
+/** Create a quota error that maps directly to an API response. */
 function quotaError(status, code, message, extra = {}) {
   return Object.assign(new Error(message), { status, code, ...extra });
 }
 
-/** 验证账号并预占当日额度；失效预占在后续请求中自动回收。 */
+/** Verify the account and reserve quota for the day. Future requests automatically reclaim expired reservations. */
 export async function reserveStepQuota(req) {
   const token = req.headers.get("authorization")?.match(/^Bearer (.+)$/i)?.[1];
   if (!token) throw quotaError(401, "UNAUTHORIZED", "Please sign in to generate a step.");
@@ -42,7 +42,7 @@ export async function reserveStepQuota(req) {
   try {
     ({ uid } = await getAuth(app).verifyIdToken(token));
   } catch (error) {
-    // 仅把无效令牌视为登录问题，基础设施异常保留为服务不可用。
+    // Treat only invalid tokens as sign-in errors. Report infrastructure failures as service unavailable.
     if (/^auth\/(argument-error|invalid-id-token|id-token-expired|id-token-revoked|user-disabled)$/.test(error.code || "")) {
       throw quotaError(401, "UNAUTHORIZED", "Please sign in again.");
     }
@@ -66,14 +66,14 @@ export async function reserveStepQuota(req) {
         retryAfterSeconds: count >= limit ? Math.max(1, Math.ceil((resetAt - Date.now()) / 1000)) : 60,
       });
     }
-    // 服务端生成预算为 50 秒；预占保留两分钟，进程退出后不会永久占用额度。
+    // Generation has a 50-second server budget. Reservations expire after two minutes so a process exit cannot tie up quota indefinitely.
     reservations[reservationId] = Date.now() + 120000;
     transaction.set(ref, { stepGenerationCount: count, reservations, updatedAt: FieldValue.serverTimestamp() });
   });
   return { db, ref, reservationId, limit, resetAt: new Date(resetAt).toISOString() };
 }
 
-/** 成功时确认计数，失败时仅释放预占；同一预占重复结算不会重复扣次。 */
+/** Count successes and release failed reservations. Settling the same reservation twice cannot consume quota twice. */
 export async function settleStepQuota(quota, success) {
   return quota.db.runTransaction(async (transaction) => {
     const snapshot = await transaction.get(quota.ref);

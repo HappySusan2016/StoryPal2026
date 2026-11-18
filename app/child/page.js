@@ -3,31 +3,35 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import Image from "next/image";
+import PortalShell from "../components/PortalShell";
+import PortalText from "../components/PortalText";
+import PortalIllustration from "../components/PortalIllustration";
 import StoryPlayer from "../components/StoryPlayer";
-import { db } from "../lib/firebaseClient";
+import { onAuthStateChanged } from "firebase/auth";
+import { auth, db } from "../lib/firebaseClient";
 import { doc, setDoc, getDoc, serverTimestamp } from "firebase/firestore";
-import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
-import { faStar } from "@fortawesome/free-solid-svg-icons";
+import { getProfileStories } from "../lib/portalData";
+import { saveReadingPage } from "../lib/readingSessions";
 import { useTranslation } from "../hooks/useTranslation";
 
 const STORAGE_KEY = "storypal.modules";
 const PASSPORTS_KEY = "storypal.passports";
 const PARENT_UID_KEY = "storypal.parent.uid";
 
-function loadModulesFromStorage() {
+function loadModulesFromStorage(uid) {
   if (typeof window === "undefined") return [];
   try {
-    const raw = window.localStorage.getItem(STORAGE_KEY);
+    const raw = window.localStorage.getItem(`${STORAGE_KEY}.${uid}`) || (window.localStorage.getItem(PARENT_UID_KEY) === uid ? window.localStorage.getItem(STORAGE_KEY) : null);
     return raw ? JSON.parse(raw) : [];
   } catch {
     return [];
   }
 }
 
-function loadPassportsFromStorage() {
+function loadPassportsFromStorage(uid) {
   if (typeof window === "undefined") return [];
   try {
-    const raw = window.localStorage.getItem(PASSPORTS_KEY);
+    const raw = window.localStorage.getItem(`${PASSPORTS_KEY}.${uid}`) || (window.localStorage.getItem(PARENT_UID_KEY) === uid ? window.localStorage.getItem(PASSPORTS_KEY) : null);
     return raw ? JSON.parse(raw) : [];
   } catch {
     return [];
@@ -74,7 +78,6 @@ function buildContextFromPassport(p) {
 export default function ChildPortal() {
   const { t } = useTranslation();
   const [modules, setModules] = useState([]);
-  const [selectedModule, setSelectedModule] = useState(null);
   const [passports, setPassports] = useState([]);
   const [selectedPassportId, setSelectedPassportId] = useState("");
   const [childStars, setChildStars] = useState({});
@@ -82,56 +85,43 @@ export default function ChildPortal() {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [authChecking, setAuthChecking] = useState(true);
 
-  useEffect(() => {
-    // Check authentication first
-    if (typeof window !== "undefined") {
-      const uid = window.localStorage.getItem(PARENT_UID_KEY);
-      if (!uid) {
-        setIsAuthenticated(false);
-        setAuthChecking(false);
-        return;
-      }
-      setParentUid(uid);
-      setIsAuthenticated(true);
-    }
+  /** @module Current storybook reading session */
+  const [readingSession, setReadingSession] = useState(null);
+  const [readingSaveErrorUid, setReadingSaveErrorUid] = useState(null);
+  const selectedModule = readingSession?.story;
+
+  /** @module Child mode follows authentication state and reads the current account's cache */
+  useEffect(() => onAuthStateChanged(auth, (user) => {
+    const uid = user?.uid || null;
+    setParentUid(uid);
+    setIsAuthenticated(Boolean(user));
     setAuthChecking(false);
+    setReadingSession(null);
+    setReadingSaveErrorUid(null);
+    setChildStars({});
+    const loadedPassports = uid ? loadPassportsFromStorage(uid) : [];
+    setModules(uid ? loadModulesFromStorage(uid) : []);
+    setPassports(loadedPassports);
+    setSelectedPassportId(loadedPassports[0]?.id || "");
+  }), []);
 
-    // Only load data if authenticated
-    if (isAuthenticated) {
-      setModules(loadModulesFromStorage());
-      const loadedPassports = loadPassportsFromStorage();
-      setPassports(loadedPassports);
-      // Auto-select first child if any passports exist
-      if (loadedPassports.length > 0) {
-        setSelectedPassportId(loadedPassports[0].id);
-      }
-    }
-  }, [isAuthenticated]);
-
-  // Load stars when passport is selected
+  /** @module Child reward loading ignores stale requests after a profile switch */
   useEffect(() => {
-    if (selectedPassportId && parentUid) {
-      loadStarsForChild(selectedPassportId);
-    }
-  }, [selectedPassportId, parentUid]);
-
-  async function loadStarsForChild(childId) {
-    if (!parentUid || !childId) return;
-
-    try {
-      const starsDoc = await getDoc(
-        doc(db, "users", parentUid, "childStars", childId)
-      );
-      if (starsDoc.exists()) {
-        setChildStars((prev) => ({
-          ...prev,
-          [childId]: starsDoc.data(),
-        }));
+    if (!selectedPassportId || !parentUid) return;
+    let cancelled = false;
+    async function refreshChildStars() {
+      try {
+        const starsDoc = await getDoc(doc(db, "users", parentUid, "childStars", selectedPassportId));
+        if (!cancelled && starsDoc.exists()) {
+          setChildStars(prev => ({ ...prev, [selectedPassportId]: starsDoc.data() }));
+        }
+      } catch (err) {
+        console.error("Failed to load stars", err);
       }
-    } catch (err) {
-      console.error("Failed to load stars", err);
     }
-  }
+    refreshChildStars();
+    return () => { cancelled = true; };
+  }, [selectedPassportId, parentUid]);
 
   async function handleStarsCollected(childId, moduleId, stars) {
     if (!parentUid || !childId) return;
@@ -173,157 +163,98 @@ export default function ChildPortal() {
   }
 
   const selectedPassport =
-    passports.find((p) => p.id === selectedPassportId) || null;
+    passports.find((p) => p.id === (selectedModule?.childId || selectedPassportId)) || null;
 
-  // Filter modules to show only those for the selected passport or general modules
-  const filteredModules = modules.filter((m) => {
-    // Show general modules (childId is null or empty)
-    if (!m.childId) return true;
-    // If a passport is selected, show modules for that child
-    if (selectedPassportId && m.childId === selectedPassportId) return true;
-    // Otherwise, don't show this module
-    return false;
-  });
+  /** @module The child bookshelf shows only storybooks linked to valid profiles */
+  const filteredModules = getProfileStories(modules, passports).filter((story) =>
+    !selectedPassportId || story.childId === selectedPassportId,
+  );
 
-  // Show loading while checking auth
-  if (authChecking) {
-    return (
-      <div className="min-h-screen bg-background flex items-center justify-center">
-        <div className="text-center">
-          <div className="text-4xl mb-4">🔄</div>
-          <p className="text-zinc-600">Loading...</p>
-        </div>
-      </div>
-    );
+  /** @module Child mode reading sessions and per-page saves */
+  function handleOpenStory(story) {
+    setReadingSession({ id: crypto.randomUUID(), story });
   }
 
-  // Show auth gate if not authenticated
+  function handlePageConfirmed(pageIndex, completed) {
+    if (!parentUid || auth.currentUser?.uid !== parentUid || !selectedModule?.childId || !selectedModule.id) return;
+    const session = { id: readingSession.id, childId: selectedModule.childId, moduleId: selectedModule.id };
+    saveReadingPage(parentUid, session, pageIndex, completed).catch((error) => {
+      console.error("Failed to save reading page", error);
+      if (auth.currentUser?.uid === parentUid) setReadingSaveErrorUid(parentUid);
+    });
+  }
+
+  if (authChecking) {
+    return <PortalShell><main className="kid-mode" role="status"><p className="lede">{t("Loading…")}</p></main></PortalShell>;
+  }
+
   if (!isAuthenticated) {
     return (
-      <div className="min-h-screen bg-background flex items-center justify-center px-6">
-        <div className="max-w-md text-center">
-          <div className="text-8xl mb-6">🔒</div>
-          <h1 className="text-3xl font-bold text-zinc-900 mb-4">
-            Access Restricted
-          </h1>
-          <p className="text-lg text-zinc-700 mb-8">
-            The Child Portal requires a parent to be signed in first.
-          </p>
-          <Link
-            href="/parent/auth"
-            className="inline-block px-8 py-3 bg-[#5b217f] text-white rounded-xl font-semibold hover:bg-[#7c2da3] transition-colors shadow-lg"
-          >
-            Parent Sign In
-          </Link>
-          <div className="mt-6">
-            <Link
-              href="/"
-              className="text-sm text-zinc-600 hover:text-zinc-900 underline"
-            >
-              Return to Home
-            </Link>
-          </div>
-        </div>
-      </div>
+      <PortalShell>
+        <main className="kid-mode child-access">
+          <h1>{t("Access Restricted")}</h1>
+          <p className="lede">{t("The Child Portal requires a parent to be signed in first.")}</p>
+          <Link className="primary auto" href="/login">{t("Parent Sign In")}</Link>
+          <p className="switch"><Link href="/">{t("Return to Home")}</Link></p>
+        </main>
+      </PortalShell>
     );
   }
 
   return (
-    <div className="min-h-screen bg-background px-6 py-8">
-      <div className="max-w-6xl mx-auto">
-        <div className="flex items-center justify-between">
-          <h1 className="text-4xl font-semibold text-zinc-900">{t("childPortal")}</h1>
-        </div>
-        <p className="mt-2 text-zinc-700">{t("selectYourPassport")}</p>
-
-        <div className="mt-4 rounded-2xl bg-white/80 backdrop-blur p-4 shadow-sm">
-          <div className="flex items-center justify-between gap-3">
-            <div className="flex items-center gap-3">
-              <label className="text-sm text-zinc-700">
-                Select your profile
-              </label>
-              <select
-                value={selectedPassportId}
-                onChange={(e) => setSelectedPassportId(e.target.value)}
-                className="bg-white/90 border border-zinc-200 rounded-xl px-4 py-2 text-zinc-900 focus:outline-none focus:ring-2 focus:ring-rose-300/50 focus:border-rose-300 transition-all"
-              >
-                <option value="">— None —</option>
-                {passports.map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {p.childName}
-                  </option>
-                ))}
-              </select>
-              <span className="text-xs text-zinc-500">
-                Passports are created in the Parent Portal.
-              </span>
-            </div>
-
-            {/* Stars Display */}
-            {selectedPassportId && (
-              <div className="flex items-center justify-center gap-2 px-4 py-2 bg-amber-200 rounded-xl ">
-                <span className="text-lg text-yellow-500">
-                  <FontAwesomeIcon icon={faStar} />
-                </span>
-                <div className="text-left">
-                  <div className="text-lg font-bold text-amber-900">
-                    {childStars[selectedPassportId]?.totalStars || 0} {t("stars")}
-                  </div>
-                </div>
-              </div>
-            )}
-          </div>
-        </div>
-
-        <section className="mt-6 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
-          {filteredModules.length === 0 && (
-            <div className="text-zinc-600">
-              {t("noStoriesYet")}
-            </div>
+    <>
+      <PortalShell>
+        <main className="kid-mode">
+          <div className="eyebrow child-eyebrow"><span />{t("STORY TIME")}</div>
+          <h1><PortalText text={t('Pick a <em class="accent">story</em>')} /></h1>
+          <p className="lede">{t("Tap a story and read it together.")}</p>
+          {readingSaveErrorUid === parentUid && (
+            <p className="notice error" role="alert">{t("Could not save changes. Please try again.")}</p>
           )}
-          {filteredModules.map((m) => (
-            <button
-              key={m.id}
-              type="button"
-              onClick={() => setSelectedModule(m)}
-              className="text-left rounded-2xl p-4 shadow-sm hover:shadow-md transition-shadow duration-200 bg-white/80 backdrop-blur"
-            >
-              <div className="relative w-full aspect-4/3 rounded-xl overflow-hidden mb-3 bg-zinc-100">
-                {m.coverImage ? (
-                  <Image
-                    src={m.coverImage}
-                    alt={m.title}
-                    fill
-                    className="object-cover"
-                    unoptimized
-                    sizes="(max-width: 768px) 100vw, (max-width: 1200px) 50vw, 33vw"
-                  />
-                ) : (
-                  <div className="w-full h-full flex items-center justify-center text-zinc-400">
-                    No image
+          <div className="kid-pick" role="group" aria-label={t("Select your profile")}>
+            <button type="button" aria-pressed={!selectedPassportId} onClick={() => setSelectedPassportId("")}>{t("Everyone")}</button>
+            {passports.map(passport => (
+              <button key={passport.id} type="button" aria-pressed={selectedPassportId === passport.id} onClick={() => setSelectedPassportId(passport.id)}>
+                {passport.childName}
+              </button>
+            ))}
+          </div>
+          {selectedPassportId && (
+            <p className="child-stars" role="status"><span aria-hidden="true">★</span> {childStars[selectedPassportId]?.totalStars || 0} {t("stars")}</p>
+          )}
+          <section className="kid-grid" aria-label={t("Stories")}>
+            {!filteredModules.length && <p className="empty-state child-empty">{t("noStoriesYet")}</p>}
+            {filteredModules.map(story => {
+              const owner = passports.find(passport => passport.id === story.childId);
+              return (
+                <button className="kid-card" key={story.id} type="button" onClick={() => handleOpenStory(story)}>
+                  {story.coverImage ? (
+                    <Image className="kid-cover" src={story.coverImage} alt="" width={600} height={300} unoptimized />
+                  ) : <PortalIllustration />}
+                  <div className="txt">
+                    <b>{story.title}</b>
+                    <span>{t("For {nickname} · {n} pages", { nickname: owner?.childName || t("Everyone"), n: story.steps?.length || 0 })}</span>
                   </div>
-                )}
-              </div>
-              <div className="text-zinc-900 font-semibold leading-snug">
-                {m.title}
-              </div>
-            </button>
-          ))}
-        </section>
-      </div>
-
+                </button>
+              );
+            })}
+          </section>
+          <p className="switch child-back"><Link href="/">{t("Back to the grown-up space")}</Link></p>
+        </main>
+      </PortalShell>
+      {/* Keep the player outside the portal style scope to preserve its modal layout and reward flow. */}
       {selectedModule && (
         <StoryPlayer
           moduleDefinition={selectedModule}
           templateContext={buildContextFromPassport(selectedPassport)}
           narrate={true}
           preferredVoice="female"
-          childId={selectedPassportId}
+          childId={selectedPassport?.id || ""}
           onStarsCollected={handleStarsCollected}
-          onClose={() => setSelectedModule(null)}
-          onFinished={() => setSelectedModule(null)}
+          onPageConfirmed={handlePageConfirmed}
+          onClose={() => setReadingSession(null)}
         />
       )}
-    </div>
+    </>
   );
 }

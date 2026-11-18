@@ -1,6 +1,6 @@
-/* 绘本打印：隔离阅读界面，按 A4 横向完整排版全部步骤。 */
+/* Print all storybook steps in landscape A4 in a layout separate from the reader. */
 
-/** 等待打印资源就绪；失败或超时不输出缺图的绘本。 */
+/** Wait for print assets to load. Abort on failure or timeout to avoid printing with missing images. */
 async function waitForPrintResources(document) {
   await Promise.all([
     document.fonts.ready,
@@ -8,9 +8,9 @@ async function waitForPrintResources(document) {
   ]);
 }
 
-/** 将共享绘本内容复制到独立打印文档，不改变阅读页及交互状态。 */
+/** Copy shared storybook content into a separate print document while preserving the reader's page and interaction state. */
 export async function printStoryPages(source, title) {
-  // 浏览器根据文档标题生成默认文件名，将连续空白统一替换为短横线。
+  // The browser uses the document title as the default filename. Replace runs of whitespace with hyphens.
   const printTitle = title.trim().replace(/\s+/g, '-');
   const frame = document.createElement('iframe');
   frame.title = printTitle;
@@ -27,7 +27,7 @@ export async function printStoryPages(source, title) {
     printDocument.title = printTitle;
     printDocument.documentElement.className = document.documentElement.className;
     printDocument.body.className = document.body.className;
-    // 复用页面样式和字体，避免重新维护一套绘本视觉样式。
+    // Reuse page styles and fonts to keep one source for the storybook's visual styles.
     const stylesReady = Array.from(document.querySelectorAll('style, link[rel="stylesheet"]'), (node) => {
       const copy = node.cloneNode(true);
       const ready = node.tagName === 'LINK'
@@ -41,18 +41,18 @@ export async function printStoryPages(source, title) {
     });
     const style = printDocument.createElement('style');
     style.textContent = `
-      /* 零页边距抑制浏览器页眉页脚，留白由页面内边距提供。 */
+      /* Zero page margins suppress browser headers and footers. Page padding supplies whitespace. */
       @page { size: A4 landscape; margin: 0; }
       html, body { margin: 0 !important; padding: 0 !important; background: white !important; }
       * { print-color-adjust: exact; -webkit-print-color-adjust: exact; }
-      /* 内容脱离跨页流：选项等后代只能在所属页面内布局。预留 1mm 消除纸张舍入误差。 */
+      /* Remove content from the cross-page flow so descendants such as choices stay on their own page. Allow 1 mm for paper size rounding. */
       .story-print-page { position: relative; box-sizing: border-box; width: 297mm; height: 209mm; break-inside: avoid; page-break-inside: avoid; break-after: page; page-break-after: always; }
       .story-print-page:last-child { break-after: auto; page-break-after: auto; }
       .story-print-viewport { position: absolute; top: 10mm; left: 10mm; width: 277mm; height: 183mm; }
-      /* 直接使用纸张宽度排版，不对嵌套 Flex/Grid 应用 zoom 或整块禁止分页。 */
+      /* Lay out content at the paper width without applying zoom or blocking page breaks on nested flex and grid containers. */
       .story-print-content { --story-print-text-scale: 1; position: absolute; top: 0; left: 0; display: flow-root; width: 100%; margin: 0; }
       .story-print-copy, .story-print-step { display: block !important; flex: none !important; }
-      /* 普通行内盒保留双列外观，避开 Grid 的打印碎片化布局。 */
+      /* Regular inline boxes preserve the two-column layout and avoid grid fragmentation during printing. */
       .story-print-options { display: block !important; font-size: 0; }
       .story-print-options > button { display: inline-block; box-sizing: border-box; width: calc((100% - 0.75rem) / 2); margin: 0 0 0.75rem; vertical-align: top; }
       .story-print-options > button:nth-child(odd) { margin-right: 0.75rem; }
@@ -67,7 +67,7 @@ export async function printStoryPages(source, title) {
     `;
     printDocument.head.appendChild(style);
     const pages = source.cloneNode(true);
-    // 克隆节点时显式同步输入框当前值；其余步骤保持空白。
+    // Copy the current input value explicitly when cloning nodes. Leave inputs on other steps blank.
     source.querySelectorAll('input').forEach((input, index) => {
       pages.querySelectorAll('input')[index].value = input.value;
     });
@@ -75,7 +75,7 @@ export async function printStoryPages(source, title) {
       image.loading = 'eager';
       image.removeAttribute('srcset');
     });
-    // 自绘页码独立于缩放内容，不启用会带出时间和网址的浏览器页脚。
+    // Render page numbers independently of the scaled content and omit browser footers that include the time and URL.
     const storyPages = Array.from(pages.querySelectorAll('.story-print-page'));
     storyPages.forEach((page, index) => {
       const viewport = printDocument.createElement('div');
@@ -97,7 +97,7 @@ export async function printStoryPages(source, title) {
       }),
     ]);
     clearTimeout(timeout);
-    // 图片使用文字和选项之外的剩余高度；始终在最终纸张尺寸下测量。
+    // Images use the height remaining after text and choices. Always measure at the final paper size.
     storyPages.forEach((page, index) => {
       const viewport = page.querySelector('.story-print-viewport');
       const content = viewport.firstElementChild;
@@ -117,7 +117,7 @@ export async function printStoryPages(source, title) {
         const minimumHeight = Math.min(96, preferredHeights[imageIndex]);
         image.style.height = `${Math.max(minimumHeight, preferredHeights[imageIndex] * Math.min(1, imageBudget / preferredTotal))}px`;
       });
-      // 最后检查所有后代，包括长选项；超长文本只调整字号，不缩放页面盒模型。
+      // Check all descendants, including long choices. For oversized text, adjust font size while preserving the page box model.
       const getContentHeight = () => {
         const top = content.getBoundingClientRect().top;
         return Math.max(content.offsetHeight, content.scrollHeight,
@@ -128,13 +128,13 @@ export async function printStoryPages(source, title) {
         textScale *= Math.min(0.9, availableHeight / getContentHeight());
         content.style.setProperty('--story-print-text-scale', String(textScale));
       }
-      // 不再裁切溢出；无法完整容纳时中止打印，避免静默生成缺内容的文件。
+      // Abort printing if the content cannot fit in full, so nothing is silently clipped.
       if (getContentHeight() > availableHeight || content.scrollWidth > viewport.clientWidth + 1) {
         throw new Error(`Story page ${index + 1} does not fit on A4`);
       }
     });
     await new Promise((resolve) => printWindow.requestAnimationFrame(() => printWindow.requestAnimationFrame(resolve)));
-    // 部分浏览器使用主文档标题命名 PDF，必须保持到打印预览关闭。
+    // Some browsers name the PDF after the main document title. Keep that title until print preview closes.
     const originalTitle = document.title;
     document.title = printTitle;
     await new Promise((resolve, reject) => {

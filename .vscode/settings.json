@@ -1,11 +1,12 @@
 {
-  "i18n-ally.localesPaths": [".vscode/i18n"],
-  "i18n-ally.pathMatcher": "{locale}.js",
-  "i18n-ally.enabledParsers": ["js"],
+  "i18n-ally.localesPaths": ["app/locales"],
+  "i18n-ally.pathMatcher": "{locale}.json",
+  "i18n-ally.enabledParsers": ["json"],
   "i18n-ally.enabledFrameworks": ["custom"],
-  "i18n-ally.sourceLanguage": "zh",
+  "i18n-ally.sourceLanguage": "en",
   "i18n-ally.displayLanguage": "zh",
   "i18n-ally.namespace": false,
+  "i18n-ally.keystyle": "flat",
   "i18n-ally.readonly": true,
   "i18n-ally.annotations": true,
   "i18n-ally.annotationInPlace": false

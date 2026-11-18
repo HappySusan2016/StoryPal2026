@@ -1,5 +1,5 @@
-/* 编辑器中文翻译适配：仅引用业务翻译源，不复制文案。 */
+/* Chinese editor translations reference the application dictionaries directly to avoid duplicating strings. */
 import { translations } from "../../app/lib/translations.js";
 
-/** @module 编辑器中文文案 */
+/** @module Chinese editor strings */
 export default translations.zh;

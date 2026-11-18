@@ -9,38 +9,30 @@ import {
   serverTimestamp,
   writeBatch,
 } from "firebase/firestore";
+import { decideTelemetryEnabled, cleanTelemetryPayload } from "../lib/telemetry";
 import { auth, db } from "../lib/firebaseClient";
 
 const ENABLED = process.env.NEXT_PUBLIC_TELEMETRY_ENABLED === "true";
 const SAMPLE_RATE = Number(process.env.NEXT_PUBLIC_TELEMETRY_SAMPLE_RATE ?? "1"); // 0..1
-const MAX_QUEUE = Number(process.env.NEXT_PUBLIC_TELEMETRY_MAX_QUEUE ?? "50");
-const FLUSH_EVERY_MS = Number(process.env.NEXT_PUBLIC_TELEMETRY_FLUSH_MS ?? "5000");
+const MAX_QUEUE = Math.min(400, Math.max(1, Number(process.env.NEXT_PUBLIC_TELEMETRY_MAX_QUEUE) || 50));
+const FLUSH_EVERY_MS = Math.max(1000, Number(process.env.NEXT_PUBLIC_TELEMETRY_FLUSH_MS) || 5000);
 
 function getOrCreateSessionId() {
   if (typeof window === "undefined") return "ssr";
   const key = "sp.telemetry.sessionId";
-  const existing = window.sessionStorage.getItem(key);
-  if (existing) return existing;
-  const id =
-    (window.crypto?.randomUUID && window.crypto.randomUUID()) ||
-    `sess_${Date.now()}_${Math.random().toString(16).slice(2)}`;
-  window.sessionStorage.setItem(key, id);
-  return id;
+  const createId = () => window.crypto?.randomUUID?.() || `sess_${Date.now()}_${Math.random().toString(16).slice(2)}`;
+  try {
+    const existing = window.sessionStorage.getItem(key);
+    if (existing) return existing;
+    const id = createId();
+    window.sessionStorage.setItem(key, id);
+    return id;
+  } catch {
+    return createId();
+  }
 }
 
-function getOrDecideEnabled() {
-  if (typeof window === "undefined") return false;
-  const key = "sp.telemetry.enabled";
-  const existing = window.sessionStorage.getItem(key);
-  if (existing === "true") return true;
-  if (existing === "false") return false;
-
-  const sr = Number.isFinite(SAMPLE_RATE) ? SAMPLE_RATE : 1;
-  const decided = ENABLED && Math.random() < Math.max(0, Math.min(1, sr));
-  window.sessionStorage.setItem(key, decided ? "true" : "false");
-  return decided;
-}
-
+/** @module Authenticated telemetry collection, batch writes, and page timing */
 export default function TelemetryProvider() {
   const pathname = usePathname();
 
@@ -55,7 +47,10 @@ export default function TelemetryProvider() {
   const visibleAccumMsRef = useRef(0);
 
   const queueRef = useRef([]);
-  const flushingRef = useRef(false);
+  const flushPromiseRef = useRef(null);
+  const lastFlushAtRef = useRef(null);
+  const lastErrorRef = useRef(null);
+  const sessionStartedAtRef = useRef(null);
 
   function startVisibleTimer() {
     if (typeof document === "undefined") return;
@@ -78,7 +73,7 @@ export default function TelemetryProvider() {
       type,
       path: currentPathRef.current || "",
       ts: Date.now(),
-      ...payload,
+      ...cleanTelemetryPayload(payload),
     });
 
     if (queueRef.current.length > MAX_QUEUE) {
@@ -86,69 +81,67 @@ export default function TelemetryProvider() {
     }
   }
 
+  /** Share the write promise so analytics queries can wait for the initial batch already in flight. */
   async function flush(reason = "interval") {
-    if (!enabledRef.current) return;
-    if (!uidRef.current) return;
-    if (!sessionIdRef.current) return;
-    if (flushingRef.current) return;
-    if (queueRef.current.length === 0) return;
-
-    flushingRef.current = true;
+    if (!enabledRef.current || !uidRef.current || !sessionIdRef.current) return;
+    if (flushPromiseRef.current) {
+      await flushPromiseRef.current;
+      if (lastErrorRef.current) return;
+    }
+    if (!queueRef.current.length) return;
 
     const uid = uidRef.current;
     const sessionId = sessionIdRef.current;
     const events = queueRef.current.splice(0, queueRef.current.length);
-
-    try {
-      const batch = writeBatch(db);
-
-      const sessionDoc = doc(db, "users", uid, "telemetrySessions", sessionId);
-      batch.set(
-        sessionDoc,
-        {
+    const pending = (async () => {
+      try {
+        const batch = writeBatch(db);
+        batch.set(doc(db, "users", uid, "telemetrySessions", sessionId), {
+          createdAt: sessionStartedAtRef.current,
           updatedAt: serverTimestamp(),
-          createdAt: serverTimestamp(),
           lastFlushReason: reason,
-          userAgent: typeof navigator !== "undefined" ? navigator.userAgent : "",
-        },
-        { merge: true }
-      );
-
-      const eventsCol = collection(
-        db,
-        "users",
-        uid,
-        "telemetrySessions",
-        sessionId,
-        "events"
-      );
-      for (const e of events) {
-        batch.set(doc(eventsCol), e);
+          userAgent: navigator.userAgent,
+        }, { merge: true });
+        const eventsCol = collection(db, "users", uid, "telemetrySessions", sessionId, "events");
+        for (const event of events) batch.set(doc(eventsCol), event);
+        await batch.commit();
+        if (uidRef.current === uid) {
+          lastFlushAtRef.current = Date.now();
+          lastErrorRef.current = null;
+        }
+      } catch (error) {
+        // Requeue failed events under their original account to prevent writing them to a different account after a switch.
+        if (uidRef.current === uid) {
+          lastErrorRef.current = error.code || "write-failed";
+          queueRef.current.unshift(...events);
+          queueRef.current.splice(0, Math.max(0, queueRef.current.length - MAX_QUEUE));
+        }
+        if (process.env.NODE_ENV === "development") console.error("[Telemetry] Flush failed:", error);
       }
-
-      await batch.commit();
-      // Debug: log successful flush in dev mode
-      if (process.env.NODE_ENV === "development") {
-        console.log(`[Telemetry] Flushed ${events.length} events (${reason})`);
-      }
-    } catch (err) {
-      // Log errors in development for debugging
-      if (process.env.NODE_ENV === "development") {
-        console.error("[Telemetry] Flush failed:", err);
-      }
-      // Best-effort: put events back (bounded) without logging to telemetry
-      queueRef.current.unshift(...events);
-      if (queueRef.current.length > MAX_QUEUE) {
-        queueRef.current.splice(0, queueRef.current.length - MAX_QUEUE);
-      }
+    })();
+    flushPromiseRef.current = pending;
+    try {
+      await pending;
     } finally {
-      flushingRef.current = false;
+      if (flushPromiseRef.current === pending) flushPromiseRef.current = null;
     }
   }
 
+  /** Expose only collection diagnostics in status and keep user identities and event content private. */
+  function getStatus() {
+    return {
+      configured: ENABLED,
+      enabled: enabledRef.current,
+      authenticated: Boolean(uidRef.current),
+      lastFlushAt: lastFlushAtRef.current,
+      lastError: lastErrorRef.current,
+    };
+  }
+
   useEffect(() => {
-    enabledRef.current = getOrDecideEnabled();
+    enabledRef.current = decideTelemetryEnabled(window.sessionStorage, ENABLED, SAMPLE_RATE);
     sessionIdRef.current = getOrCreateSessionId();
+    sessionStartedAtRef.current = new Date();
 
     // Debug logging in development
     if (process.env.NODE_ENV === "development") {
@@ -164,20 +157,38 @@ export default function TelemetryProvider() {
     pageStartAtRef.current = Date.now();
     startVisibleTimer();
 
+    window.storypalTelemetry = {
+      track: (type, payload) => enqueue(type, payload),
+      flush: () => flush("manual"),
+      getStatus,
+    };
+
     if (!enabledRef.current) {
       if (process.env.NODE_ENV === "development") {
         console.warn("[Telemetry] Disabled - check NEXT_PUBLIC_TELEMETRY_ENABLED");
       }
-      return;
+      return () => { delete window.storypalTelemetry; };
     }
 
     const unsub = onAuthStateChanged(auth, (u) => {
-      uidRef.current = u?.uid || null;
+      const uid = u?.uid || null;
+      if (uid !== uidRef.current) {
+        queueRef.current = [];
+        lastFlushAtRef.current = null;
+        lastErrorRef.current = null;
+        visibleAccumMsRef.current = 0;
+        visibleSinceRef.current = 0;
+        pageStartAtRef.current = Date.now();
+        startVisibleTimer();
+      }
+      uidRef.current = uid;
       if (process.env.NODE_ENV === "development") {
         console.log("[Telemetry] Auth state:", { uid: uidRef.current });
       }
       if (uidRef.current) {
+        // The auth callback can run after the route effect. Record the current page on initial sign-in too.
         enqueue("session_start", { sessionId: sessionIdRef.current });
+        enqueue("page_view", { toPath: currentPathRef.current, fromPath: "" });
         flush("session_start");
       } else {
         if (process.env.NODE_ENV === "development") {
@@ -243,12 +254,6 @@ export default function TelemetryProvider() {
     document.addEventListener("visibilitychange", onVisibilityChange);
     window.addEventListener("pagehide", onPageHide);
 
-    // Optional manual hook for code-driven events
-    window.storypalTelemetry = {
-      track: (type, payload) => enqueue(type, payload),
-      flush: () => flush("manual"),
-    };
-
     return () => {
       clearInterval(interval);
       document.removeEventListener("click", onClickCapture, true);
@@ -265,7 +270,10 @@ export default function TelemetryProvider() {
   // Route changes: log page_view + page_time for previous route
   useEffect(() => {
     if (!enabledRef.current) return;
-    if (!uidRef.current) return;
+    if (!uidRef.current) {
+      currentPathRef.current = pathname || "";
+      return;
+    }
 
     stopVisibleTimer();
 

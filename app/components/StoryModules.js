@@ -57,6 +57,7 @@ const TEMPLATE_VARIABLES = [
 
 // Component for inserting template variables
 function VariableSelector({ onInsert }) {
+  const { t } = useTranslation();
   const [isOpen, setIsOpen] = useState(false);
 
   const handleSelect = (value) => {
@@ -78,9 +79,7 @@ function VariableSelector({ onInsert }) {
           fill="currentColor"
         >
           <path d="M5 3a2 2 0 00-2 2v2a2 2 0 002 2h2a2 2 0 002-2V5a2 2 0 00-2-2H5zM5 11a2 2 0 00-2 2v2a2 2 0 002 2h2a2 2 0 002-2v-2a2 2 0 00-2-2H5zM11 5a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V5zM11 13a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z" />
-        </svg>
-        Insert Variable
-      </button>
+        </svg>{t("Insert Variable")}</button>
       {isOpen && (
         <>
           <div
@@ -95,7 +94,7 @@ function VariableSelector({ onInsert }) {
                 onClick={() => handleSelect(variable.value)}
                 className="w-full text-left px-4 py-2 hover:bg-blue-50 text-sm text-zinc-700"
               >
-                <div className="font-medium">{variable.label}</div>
+                <div className="font-medium">{t(variable.label)}</div>
                 <div className="text-xs text-zinc-500">{variable.value}</div>
               </button>
             ))}
@@ -156,7 +155,7 @@ export default function StoryModules({
   const [selectedPassportId, setSelectedPassportId] = useState(
     initialData?.childId || ""
   );
-  /** @module 编辑初始快照 */
+  /** @module Initial editor snapshot */
   const initialStepsRef = useRef(null);
   if (initialStepsRef.current === null) {
     initialStepsRef.current = ensureStepIds(initialData?.steps || []);
@@ -277,7 +276,7 @@ export default function StoryModules({
     };
   }
 
-  /** @module AI 步骤生成与失败提示 */
+  /** @module AI step generation and failure feedback */
   async function generateStepsFromStages() {
     setAiError("");
     if (aiRetryAt && Date.now() < aiRetryAt) return;
@@ -287,7 +286,7 @@ export default function StoryModules({
       if (!user) throw new Error("Please sign in to generate a step.");
       const token = await user.getIdToken();
       const res = await fetch("/api/generate-steps", {
-        // 客户端比服务端多留 10 秒传输时间，避免按钮一直处于禁用状态。
+        // Allow 10 extra seconds for transport on the client so the button cannot stay disabled indefinitely.
         signal: AbortSignal.timeout(60000),
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
@@ -376,7 +375,7 @@ export default function StoryModules({
         ];
       });
     } catch (e) {
-      // 超时、网络异常和业务失败均显示原因，并由 finally 恢复操作。
+      // Show the cause of timeouts, network errors, and application failures, and re-enable controls in finally.
       const reason = e?.name === "TimeoutError" || e?.name === "AbortError"
         ? "Request timed out. Please try again."
         : e instanceof TypeError
@@ -542,20 +541,18 @@ export default function StoryModules({
                 id="title"
                 value={title}
                 onChange={(e) => setTitle(e.target.value)}
-                placeholder="e.g., Calm Breathing Mission"
+                placeholder={t("e.g., Calm Breathing Mission")}
                 className="mt-1 w-full bg-white/90 border border-zinc-200 rounded-xl px-4 py-2 text-zinc-900 placeholder-zinc-400 focus:outline-none focus:ring-2 focus:ring-rose-300/50 focus:border-rose-300 transition-all"
               />
             </div>
             <div>
-              <label htmlFor="cover" className="block text-sm text-zinc-700">
-                Cover Image (optional)
-              </label>
+              <label htmlFor="cover" className="block text-sm text-zinc-700">{t("Cover Image (optional)")}</label>
               <div className="mt-1 flex gap-2">
                 <input
                   id="cover"
                   value={coverImage}
                   onChange={(e) => setCoverImage(e.target.value)}
-                  placeholder="Paste an image link here (optional)"
+                  placeholder={t("Paste an image link here (optional)")}
                   className="flex-1 bg-white/90 border border-zinc-200 rounded-xl px-4 py-2 text-zinc-900 placeholder-zinc-400 focus:outline-none focus:ring-2 focus:ring-rose-300/50 focus:border-rose-300 transition-all"
                 />
                 <label className="rounded-xl px-4 py-2 bg-blue-50 hover:bg-blue-100 text-blue-700 text-sm font-medium border border-blue-200 cursor-pointer transition-colors flex items-center gap-1">
@@ -570,9 +567,7 @@ export default function StoryModules({
                       d="M4 3a2 2 0 00-2 2v10a2 2 0 002 2h12a2 2 0 002-2V5a2 2 0 00-2-2H4zm12 12H4l4-8 3 6 2-4 3 6z"
                       clipRule="evenodd"
                     />
-                  </svg>
-                  Upload Image
-                  <input
+                  </svg>{t("Upload Image")}<input
                     type="file"
                     accept="image/*"
                     className="hidden"
@@ -584,7 +579,7 @@ export default function StoryModules({
                           setCoverImage(dataURL);
                         } catch (error) {
                           console.error("Error uploading image:", error);
-                          alert("Failed to upload image. Please try again.");
+                          alert(t("Failed to upload image. Please try again."));
                         }
                       }
                       e.target.value = ""; // Reset input
@@ -596,7 +591,7 @@ export default function StoryModules({
                 <div className="mt-2 relative w-full max-w-xs aspect-4/3 rounded-lg overflow-hidden border border-zinc-200">
                   <img
                     src={coverImage}
-                    alt="Cover preview"
+                    alt={t("Cover preview")}
                     className="w-full h-full object-cover"
                   />
                 </div>
@@ -607,51 +602,40 @@ export default function StoryModules({
               <label
                 htmlFor="passport-select"
                 className="block text-sm text-zinc-700"
-              >
-                For Child (Passport)
-              </label>
+              >{t("For Child (Passport)")}</label>
               <select
                 id="passport-select"
                 value={selectedPassportId}
                 onChange={(e) => setSelectedPassportId(e.target.value)}
                 className="mt-1 w-full bg-white/90 border border-zinc-200 rounded-xl px-4 py-2 text-zinc-900 focus:outline-none focus:ring-2 focus:ring-rose-300/50 focus:border-rose-300 transition-all"
               >
-                <option value="">All Children / General</option>
+                <option value="">{t("All Children / General")}</option>
                 {passports?.map((p) => (
                   <option key={p.id} value={p.id}>
                     {p.childName}
                   </option>
                 ))}
               </select>
-              <p className="mt-1 text-xs text-zinc-500">
-                Select which child this story is for. Leave as "All Children"
-                for stories that work for everyone.
-              </p>
+              <p className="mt-1 text-xs text-zinc-500">{t("Select which child this story is for. Leave as \"All Children\" for stories that work for everyone.")}</p>
             </div>
 
             <div className="flex items-center gap-2">
-              <span className="text-sm text-zinc-700">Add scene:</span>
+              <span className="text-sm text-zinc-700">{t("Add scene:")}</span>
               <button
                 type="button"
                 onClick={() => addStep("doctor")}
-                className="rounded-xl px-3 py-1.5 bg-[#5b217f] text-white hover:bg-[#7c2da3]"
-              >
-                Message
-              </button>
+                className="rounded-xl px-3 py-1.5 bg-[#315e4a] text-white hover:bg-[#244a39]"
+              >{t("Message")}</button>
               <button
                 type="button"
                 onClick={() => addStep("user-input")}
-                className="rounded-xl px-3 py-1.5 bg-[#6b2a99] text-white hover:bg-[#7c2da3]"
-              >
-                Child's input
-              </button>
+                className="rounded-xl px-3 py-1.5 bg-[#6b2a99] text-white hover:bg-[#244a39]"
+              >{t("Child's input")}</button>
               <button
                 type="button"
                 onClick={() => addStep("choice")}
-                className="rounded-xl px-3 py-1.5 bg-[#7c2da3] text-white hover:bg-[#5b217f]"
-              >
-                Multiple choice
-              </button>
+                className="rounded-xl px-3 py-1.5 bg-[#244a39] text-white hover:bg-[#315e4a]"
+              >{t("Multiple choice")}</button>
             </div>
 
             <ol className="space-y-4">
@@ -662,7 +646,7 @@ export default function StoryModules({
                 >
                   <div className="flex items-center justify-between">
                     <div className="text-sm text-zinc-600">
-                      {getStepTypeLabel(step.type)}
+                      {t(getStepTypeLabel(step.type))}
                     </div>
                     <div className="flex items-center gap-2">
                       <button
@@ -683,9 +667,7 @@ export default function StoryModules({
                         type="button"
                         onClick={() => deleteStep(step.id)}
                         className="rounded-lg px-2 py-1 text-red-600 hover:bg-red-50"
-                      >
-                        Delete
-                      </button>
+                      >{t("Delete")}</button>
                     </div>
                   </div>
 
@@ -693,9 +675,7 @@ export default function StoryModules({
                     <div className="mt-3 space-y-3">
                       <div>
                         <div className="flex items-center justify-between mb-1">
-                          <label className="block text-sm text-zinc-700">
-                            Message
-                          </label>
+                          <label className="block text-sm text-zinc-700">{t("Message")}</label>
                           <VariableSelector
                             onInsert={(variable) =>
                               insertVariableAtCursor(
@@ -715,21 +695,19 @@ export default function StoryModules({
                             updateStep(step.id, "message", e.target.value)
                           }
                           rows={3}
-                          placeholder="Write the message..."
+                          placeholder={t("Write the message...")}
                           className="mt-1 w-full bg-white/90 border border-zinc-200 rounded-xl px-4 py-2 text-zinc-900 placeholder-zinc-400 focus:outline-none focus:ring-2 focus:ring-rose-300/50 focus:border-rose-300 transition-all"
                         />
                       </div>
                       <div>
-                        <label className="block text-sm text-zinc-700">
-                          Image (optional)
-                        </label>
+                        <label className="block text-sm text-zinc-700">{t("Image (optional)")}</label>
                         <div className="mt-1 flex gap-2">
                           <input
                             value={step.imageUrl || ""}
                             onChange={(e) =>
                               updateStep(step.id, "imageUrl", e.target.value)
                             }
-                            placeholder="Paste an image link here (optional)"
+                            placeholder={t("Paste an image link here (optional)")}
                             className="flex-1 bg-white/90 border border-zinc-200 rounded-xl px-4 py-2 text-zinc-900 placeholder-zinc-400 focus:outline-none focus:ring-2 focus:ring-rose-300/50 focus:border-rose-300 transition-all"
                           />
                           <label className="rounded-xl px-4 py-2 bg-blue-50 hover:bg-blue-100 text-blue-700 text-sm font-medium border border-blue-200 cursor-pointer transition-colors flex items-center gap-1 whitespace-nowrap">
@@ -744,9 +722,7 @@ export default function StoryModules({
                                 d="M4 3a2 2 0 00-2 2v10a2 2 0 002 2h12a2 2 0 002-2V5a2 2 0 00-2-2H4zm12 12H4l4-8 3 6 2-4 3 6z"
                                 clipRule="evenodd"
                               />
-                            </svg>
-                            Upload
-                            <input
+                            </svg>{t("Upload")}<input
                               type="file"
                               accept="image/*"
                               className="hidden"
@@ -775,7 +751,7 @@ export default function StoryModules({
                           <div className="mt-2 relative w-full max-w-xs aspect-4/3 rounded-lg overflow-hidden border border-zinc-200">
                             <img
                               src={step.imageUrl}
-                              alt="Step preview"
+                              alt={t("Step preview")}
                               className="w-full h-full object-cover"
                             />
                           </div>
@@ -788,9 +764,7 @@ export default function StoryModules({
                     <div className="mt-3 space-y-3">
                       <div>
                         <div className="flex items-center justify-between mb-1">
-                          <label className="block text-sm text-zinc-700">
-                            Prompt
-                          </label>
+                          <label className="block text-sm text-zinc-700">{t("Prompt")}</label>
                           <VariableSelector
                             onInsert={(variable) =>
                               insertVariableAtCursor(
@@ -810,15 +784,13 @@ export default function StoryModules({
                             updateStep(step.id, "message", e.target.value)
                           }
                           rows={2}
-                          placeholder="Ask the child a question..."
+                          placeholder={t("Ask the child a question...")}
                           className="mt-1 w-full bg-white/90 border border-zinc-200 rounded-xl px-4 py-2 text-zinc-900 placeholder-zinc-400 focus:outline-none focus:ring-2 focus:ring-rose-300/50 focus:border-rose-300 transition-all"
                         />
                       </div>
                       <div>
                         <div className="flex items-center justify-between mb-1">
-                          <label className="block text-sm text-zinc-700">
-                            Placeholder
-                          </label>
+                          <label className="block text-sm text-zinc-700">{t("Placeholder")}</label>
                           <VariableSelector
                             onInsert={(variable) =>
                               insertVariableAtCursor(
@@ -837,21 +809,19 @@ export default function StoryModules({
                           onChange={(e) =>
                             updateStep(step.id, "placeholder", e.target.value)
                           }
-                          placeholder="Enter the child's response..."
+                          placeholder={t("Enter the child's response...")}
                           className="mt-1 w-full bg-white/90 border border-zinc-200 rounded-xl px-4 py-2 text-zinc-900 placeholder-zinc-400 focus:outline-none focus:ring-2 focus:ring-rose-300/50 focus:border-rose-300 transition-all"
                         />
                       </div>
                       <div>
-                        <label className="block text-sm text-zinc-700">
-                          Image (optional)
-                        </label>
+                        <label className="block text-sm text-zinc-700">{t("Image (optional)")}</label>
                         <div className="mt-1 flex gap-2">
                           <input
                             value={step.imageUrl || ""}
                             onChange={(e) =>
                               updateStep(step.id, "imageUrl", e.target.value)
                             }
-                            placeholder="Paste an image link here (optional)"
+                            placeholder={t("Paste an image link here (optional)")}
                             className="flex-1 bg-white/90 border border-zinc-200 rounded-xl px-4 py-2 text-zinc-900 placeholder-zinc-400 focus:outline-none focus:ring-2 focus:ring-rose-300/50 focus:border-rose-300 transition-all"
                           />
                           <label className="rounded-xl px-4 py-2 bg-blue-50 hover:bg-blue-100 text-blue-700 text-sm font-medium border border-blue-200 cursor-pointer transition-colors flex items-center gap-1 whitespace-nowrap">
@@ -866,9 +836,7 @@ export default function StoryModules({
                                 d="M4 3a2 2 0 00-2 2v10a2 2 0 002 2h12a2 2 0 002-2V5a2 2 0 00-2-2H4zm12 12H4l4-8 3 6 2-4 3 6z"
                                 clipRule="evenodd"
                               />
-                            </svg>
-                            Upload
-                            <input
+                            </svg>{t("Upload")}<input
                               type="file"
                               accept="image/*"
                               className="hidden"
@@ -897,7 +865,7 @@ export default function StoryModules({
                           <div className="mt-2 relative w-full max-w-xs aspect-4/3 rounded-lg overflow-hidden border border-zinc-200">
                             <img
                               src={step.imageUrl}
-                              alt="Step preview"
+                              alt={t("Step preview")}
                               className="w-full h-full object-cover"
                             />
                           </div>
@@ -910,9 +878,7 @@ export default function StoryModules({
                     <div className="mt-3 space-y-3">
                       <div>
                         <div className="flex items-center justify-between mb-1">
-                          <label className="block text-sm text-zinc-700">
-                            Question
-                          </label>
+                          <label className="block text-sm text-zinc-700">{t("Question")}</label>
                           <VariableSelector
                             onInsert={(variable) =>
                               insertVariableAtCursor(
@@ -932,22 +898,18 @@ export default function StoryModules({
                             updateStep(step.id, "message", e.target.value)
                           }
                           rows={2}
-                          placeholder="Ask the child to choose..."
+                          placeholder={t("Ask the child to choose...")}
                           className="mt-1 w-full bg-white/90 border border-zinc-200 rounded-xl px-4 py-2 text-zinc-900 placeholder-zinc-400 focus:outline-none focus:ring-2 focus:ring-rose-300/50 focus:border-rose-300 transition-all"
                         />
                       </div>
                       <div>
                         <div className="flex items-center justify-between">
-                          <label className="block text-sm text-zinc-700">
-                            Options
-                          </label>
+                          <label className="block text-sm text-zinc-700">{t("Options")}</label>
                           <button
                             type="button"
                             onClick={() => addChoiceOption(step.id)}
                             className="rounded-lg px-3 py-1.5 bg-zinc-100 hover:bg-zinc-200 text-sm"
-                          >
-                            Add option
-                          </button>
+                          >{t("Add option")}</button>
                         </div>
                         <div className="mt-2 space-y-2">
                           {(step.options || []).map((opt, i) => (
@@ -964,7 +926,7 @@ export default function StoryModules({
                                 type="button"
                                 onClick={() => removeChoiceOption(step.id, i)}
                                 className="rounded-lg px-2 py-2 text-red-600 hover:bg-red-50"
-                                title="Remove option"
+                                title={t("Remove option")}
                               >
                                 ✕
                               </button>
@@ -973,16 +935,14 @@ export default function StoryModules({
                         </div>
                       </div>
                       <div>
-                        <label className="block text-sm text-zinc-700">
-                          Image (optional)
-                        </label>
+                        <label className="block text-sm text-zinc-700">{t("Image (optional)")}</label>
                         <div className="mt-1 flex gap-2">
                           <input
                             value={step.imageUrl || ""}
                             onChange={(e) =>
                               updateStep(step.id, "imageUrl", e.target.value)
                             }
-                            placeholder="Paste an image link here (optional)"
+                            placeholder={t("Paste an image link here (optional)")}
                             className="flex-1 bg-white/90 border border-zinc-200 rounded-xl px-4 py-2 text-zinc-900 placeholder-zinc-400 focus:outline-none focus:ring-2 focus:ring-rose-300/50 focus:border-rose-300 transition-all"
                           />
                           <label className="rounded-xl px-4 py-2 bg-blue-50 hover:bg-blue-100 text-blue-700 text-sm font-medium border border-blue-200 cursor-pointer transition-colors flex items-center gap-1 whitespace-nowrap">
@@ -997,9 +957,7 @@ export default function StoryModules({
                                 d="M4 3a2 2 0 00-2 2v10a2 2 0 002 2h12a2 2 0 002-2V5a2 2 0 00-2-2H4zm12 12H4l4-8 3 6 2-4 3 6z"
                                 clipRule="evenodd"
                               />
-                            </svg>
-                            Upload
-                            <input
+                            </svg>{t("Upload")}<input
                               type="file"
                               accept="image/*"
                               className="hidden"
@@ -1028,7 +986,7 @@ export default function StoryModules({
                           <div className="mt-2 relative w-full max-w-xs aspect-4/3 rounded-lg overflow-hidden border border-zinc-200">
                             <img
                               src={step.imageUrl}
-                              alt="Step preview"
+                              alt={t("Step preview")}
                               className="w-full h-full object-cover"
                             />
                           </div>
@@ -1046,10 +1004,8 @@ export default function StoryModules({
                 onClick={handlePreview}
                 disabled={!isValid}
                 data-telemetry="parent_story_preview"
-                className="rounded-xl px-4 py-2 bg-[#5b217f] text-white hover:bg-[#7c2da3] disabled:opacity-50"
-              >
-                Preview
-              </button>
+                className="rounded-xl px-4 py-2 bg-[#315e4a] text-white hover:bg-[#244a39] disabled:opacity-50"
+              >{t("Preview")}</button>
               <button
                 type="button"
                 onClick={handleSave}
@@ -1057,9 +1013,9 @@ export default function StoryModules({
                 data-telemetry={
                   editingId ? "parent_story_update" : "parent_story_save"
                 }
-                className="rounded-xl px-4 py-2 bg-[#5b217f] text-white hover:bg-[#7c2da3] disabled:opacity-50"
+                className="rounded-xl px-4 py-2 bg-[#315e4a] text-white hover:bg-[#244a39] disabled:opacity-50"
               >
-                {editingId ? "Update story" : "Save story"}
+                {editingId ? t("Update story") : t("Save story")}
               </button>
             </div>
           </div>
@@ -1068,9 +1024,7 @@ export default function StoryModules({
         {/* Scene Design — NT‑UX Stages */}
         <div className="rounded-2xl bg-white/80 backdrop-blur p-5 shadow-sm">
           <div className="flex items-center justify-between">
-            <h2 className="text-xl font-semibold text-zinc-900">
-              Design Guide
-            </h2>
+            <h2 className="text-xl font-semibold text-zinc-900">{t("Design Guide")}</h2>
           </div>
 
           <div className="mt-4 flex flex-wrap gap-2">
@@ -1098,17 +1052,11 @@ export default function StoryModules({
           <div className="mt-4">
             {activeStage === 1 && (
               <div className="rounded-xl border border-zinc-200 p-4 bg-white space-y-4">
-                <h3 className="text-lg font-semibold text-zinc-900">
-                  Stage 1 · Narrative Framing
-                </h3>
-                <p className="text-sm text-zinc-600">
-                  Personalize the setup and align with today's goal.
-                </p>
+                <h3 className="text-lg font-semibold text-zinc-900">{t("Stage 1 · Narrative Framing")}</h3>
+                <p className="text-sm text-zinc-600">{t("Personalize the setup and align with today's goal.")}</p>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div>
-                    <label className="block text-sm text-zinc-700">
-                      Today's focus
-                    </label>
+                    <label className="block text-sm text-zinc-700">{t("Today's focus")}</label>
                     <select
                       value={stageFraming.focus}
                       onChange={(e) =>
@@ -1119,21 +1067,15 @@ export default function StoryModules({
                       }
                       className="mt-1 w-full bg-white/90 border border-zinc-200 rounded-xl px-4 py-2"
                     >
-                      <option value="greeting">Greeting / Saying hello</option>
-                      <option value="sharing">Sharing / Turn‑taking</option>
-                      <option value="routine">Morning routine</option>
-                      <option value="transitions">
-                        Transitions: between activities
-                      </option>
-                      <option value="sensory">
-                        Managing sensory surprises
-                      </option>
+                      <option value="greeting">{t("Greeting / Saying hello")}</option>
+                      <option value="sharing">{t("Sharing / Turn‑taking")}</option>
+                      <option value="routine">{t("Morning routine")}</option>
+                      <option value="transitions">{t("Transitions: between activities")}</option>
+                      <option value="sensory">{t("Managing sensory surprises")}</option>
                     </select>
                   </div>
                   <div>
-                    <label className="block text-sm text-zinc-700">
-                      Scenario
-                    </label>
+                    <label className="block text-sm text-zinc-700">{t("Scenario")}</label>
                     <select
                       value={stageFraming.scenario}
                       onChange={(e) =>
@@ -1144,29 +1086,19 @@ export default function StoryModules({
                       }
                       className="mt-1 w-full bg-white/90 border border-zinc-200 rounded-xl px-4 py-2"
                     >
-                      <option value="school">School: arrival and wave</option>
-                      <option value="playdate">
-                        Playdate: meet a new friend
-                      </option>
-                      <option value="store">
-                        Grocery store: checkout line
-                      </option>
-                      <option value="clinic">Clinic: waiting room</option>
-                      <option value="transitions">
-                        Transitions: changing activities
-                      </option>
-                      <option value="routine">
-                        Daily routine: getting ready
-                      </option>
-                      <option value="park">Park: playground interaction</option>
-                      <option value="home">Home: family time</option>
-                      <option value="restaurant">Restaurant: dining out</option>
+                      <option value="school">{t("School: arrival and wave")}</option>
+                      <option value="playdate">{t("Playdate: meet a new friend")}</option>
+                      <option value="store">{t("Grocery store: checkout line")}</option>
+                      <option value="clinic">{t("Clinic: waiting room")}</option>
+                      <option value="transitions">{t("Transitions: changing activities")}</option>
+                      <option value="routine">{t("Daily routine: getting ready")}</option>
+                      <option value="park">{t("Park: playground interaction")}</option>
+                      <option value="home">{t("Home: family time")}</option>
+                      <option value="restaurant">{t("Restaurant: dining out")}</option>
                     </select>
                   </div>
                   <div>
-                    <label className="block text-sm text-zinc-700">
-                      Desired tone
-                    </label>
+                    <label className="block text-sm text-zinc-700">{t("Desired tone")}</label>
                     <select
                       value={stageFraming.tone}
                       onChange={(e) =>
@@ -1177,20 +1109,16 @@ export default function StoryModules({
                       }
                       className="mt-1 w-full bg-white/90 border border-zinc-200 rounded-xl px-4 py-2"
                     >
-                      <option value="brave">Encouraging & brave</option>
-                      <option value="encouraging">
-                        Encouraging & supportive
-                      </option>
-                      <option value="calm">Calm & soothing</option>
-                      <option value="curious">Curious & playful</option>
-                      <option value="confident">Confident & empowering</option>
-                      <option value="gentle">Gentle & reassuring</option>
+                      <option value="brave">{t("Encouraging & brave")}</option>
+                      <option value="encouraging">{t("Encouraging & supportive")}</option>
+                      <option value="calm">{t("Calm & soothing")}</option>
+                      <option value="curious">{t("Curious & playful")}</option>
+                      <option value="confident">{t("Confident & empowering")}</option>
+                      <option value="gentle">{t("Gentle & reassuring")}</option>
                     </select>
                   </div>
                   <div>
-                    <label className="block text-sm text-zinc-700">
-                      Parent goal (optional)
-                    </label>
+                    <label className="block text-sm text-zinc-700">{t("Parent goal (optional)")}</label>
                     <input
                       value={stageFraming.parentGoal}
                       onChange={(e) =>
@@ -1199,7 +1127,7 @@ export default function StoryModules({
                           parentGoal: e.target.value,
                         })
                       }
-                      placeholder="e.g., Practice waving back to a classmate"
+                      placeholder={t("e.g., Practice waving back to a classmate")}
                       className="mt-1 w-full bg-white/90 border border-zinc-200 rounded-xl px-4 py-2"
                     />
                   </div>
@@ -1209,17 +1137,11 @@ export default function StoryModules({
 
             {activeStage === 2 && (
               <div className="rounded-xl border border-zinc-200 p-4 bg-white space-y-4">
-                <h3 className="text-lg font-semibold text-zinc-900">
-                  Stage 2 · Immersion
-                </h3>
-                <p className="text-sm text-zinc-600">
-                  Guide imagery and perspective‑taking; co‑play the avatar.
-                </p>
+                <h3 className="text-lg font-semibold text-zinc-900">{t("Stage 2 · Immersion")}</h3>
+                <p className="text-sm text-zinc-600">{t("Guide imagery and perspective‑taking; co‑play the avatar.")}</p>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div>
-                    <label className="block text-sm text-zinc-700">
-                      Current feeling
-                    </label>
+                    <label className="block text-sm text-zinc-700">{t("Current feeling")}</label>
                     <select
                       value={stageImmersion.feeling}
                       onChange={(e) =>
@@ -1230,16 +1152,14 @@ export default function StoryModules({
                       }
                       className="mt-1 w-full bg-white/90 border border-zinc-200 rounded-xl px-4 py-2"
                     >
-                      <option value="shy">Shy</option>
-                      <option value="excited">Excited</option>
-                      <option value="nervous">Nervous</option>
-                      <option value="proud">Proud</option>
+                      <option value="shy">{t("Shy")}</option>
+                      <option value="excited">{t("Excited")}</option>
+                      <option value="nervous">{t("Nervous")}</option>
+                      <option value="proud">{t("Proud")}</option>
                     </select>
                   </div>
                   <div>
-                    <label className="block text-sm text-zinc-700">
-                      Co‑play prompt
-                    </label>
+                    <label className="block text-sm text-zinc-700">{t("Co‑play prompt")}</label>
                     <select
                       value={stageImmersion.coplay}
                       onChange={(e) =>
@@ -1250,18 +1170,14 @@ export default function StoryModules({
                       }
                       className="mt-1 w-full bg-white/90 border border-zinc-200 rounded-xl px-4 py-2"
                     >
-                      <option value="wave">Practice a superhero wave</option>
-                      <option value="share">
-                        Offer a toy and say "your turn"
-                      </option>
-                      <option value="count">Count to three together</option>
-                      <option value="breathe">Do a 3‑breath sparkle</option>
+                      <option value="wave">{t("Practice a superhero wave")}</option>
+                      <option value="share">{t("Offer a toy and say \"your turn\"")}</option>
+                      <option value="count">{t("Count to three together")}</option>
+                      <option value="breathe">{t("Do a 3‑breath sparkle")}</option>
                     </select>
                   </div>
                   <div className="md:col-span-2">
-                    <label className="block text-sm text-zinc-700">
-                      Imagery line (optional)
-                    </label>
+                    <label className="block text-sm text-zinc-700">{t("Imagery line (optional)")}</label>
                     <textarea
                       value={stageImmersion.imagery}
                       onChange={(e) =>
@@ -1270,7 +1186,7 @@ export default function StoryModules({
                           imagery: e.target.value,
                         })
                       }
-                      placeholder="Describe what your child sees (e.g., 'Blue backpack, Mia smiles and waves')."
+                      placeholder={t("Describe what your child sees (e.g., 'Blue backpack, Mia smiles and waves').")}
                       rows={2}
                       className="mt-1 w-full bg-white/90 border border-zinc-200 rounded-xl px-4 py-2"
                     />
@@ -1281,17 +1197,11 @@ export default function StoryModules({
 
             {activeStage === 3 && (
               <div className="rounded-xl border border-zinc-200 p-4 bg-white space-y-4">
-                <h3 className="text-lg font-semibold text-zinc-900">
-                  Stage 3 · Reflection
-                </h3>
-                <p className="text-sm text-zinc-600">
-                  Connect the story to real‑life experiences and log progress.
-                </p>
+                <h3 className="text-lg font-semibold text-zinc-900">{t("Stage 3 · Reflection")}</h3>
+                <p className="text-sm text-zinc-600">{t("Connect the story to real‑life experiences and log progress.")}</p>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div>
-                    <label className="block text-sm text-zinc-700">
-                      What did your child try?
-                    </label>
+                    <label className="block text-sm text-zinc-700">{t("What did your child try?")}</label>
                     <input
                       value={stageReflection.tried}
                       onChange={(e) =>
@@ -1300,14 +1210,12 @@ export default function StoryModules({
                           tried: e.target.value,
                         })
                       }
-                      placeholder="e.g., Waved back and smiled"
+                      placeholder={t("e.g., Waved back and smiled")}
                       className="mt-1 w-full bg-white/90 border border-zinc-200 rounded-xl px-4 py-2"
                     />
                   </div>
                   <div>
-                    <label className="block text-sm text-zinc-700">
-                      Parent confidence
-                    </label>
+                    <label className="block text-sm text-zinc-700">{t("Parent confidence")}</label>
                     <select
                       value={stageReflection.confidence}
                       onChange={(e) =>
@@ -1318,15 +1226,13 @@ export default function StoryModules({
                       }
                       className="mt-1 w-full bg-white/90 border border-zinc-200 rounded-xl px-4 py-2"
                     >
-                      <option>Low</option>
-                      <option>Medium</option>
-                      <option>High</option>
+                      <option>{t("Low")}</option>
+                      <option>{t("Medium")}</option>
+                      <option>{t("High")}</option>
                     </select>
                   </div>
                   <div>
-                    <label className="block text-sm text-zinc-700">
-                      Child comfort
-                    </label>
+                    <label className="block text-sm text-zinc-700">{t("Child comfort")}</label>
                     <select
                       value={stageReflection.comfort}
                       onChange={(e) =>
@@ -1337,9 +1243,9 @@ export default function StoryModules({
                       }
                       className="mt-1 w-full bg-white/90 border border-zinc-200 rounded-xl px-4 py-2"
                     >
-                      <option>Low</option>
-                      <option>Medium</option>
-                      <option>High</option>
+                      <option>{t("Low")}</option>
+                      <option>{t("Medium")}</option>
+                      <option>{t("High")}</option>
                     </select>
                   </div>
                 </div>
@@ -1348,17 +1254,11 @@ export default function StoryModules({
 
             {activeStage === 4 && (
               <div className="rounded-xl border border-zinc-200 p-4 bg-white space-y-4">
-                <h3 className="text-lg font-semibold text-zinc-900">
-                  Stage 4 · Continuity
-                </h3>
-                <p className="text-sm text-zinc-600">
-                  Keep the arc going with micro‑quests and badges.
-                </p>
+                <h3 className="text-lg font-semibold text-zinc-900">{t("Stage 4 · Continuity")}</h3>
+                <p className="text-sm text-zinc-600">{t("Keep the arc going with micro‑quests and badges.")}</p>
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                   <div>
-                    <label className="block text-sm text-zinc-700">
-                      Next arc
-                    </label>
+                    <label className="block text-sm text-zinc-700">{t("Next arc")}</label>
                     <select
                       value={stageContinuity.nextArc}
                       onChange={(e) =>
@@ -1369,17 +1269,13 @@ export default function StoryModules({
                       }
                       className="mt-1 w-full bg-white/90 border border-zinc-200 rounded-xl px-4 py-2"
                     >
-                      <option value="school-arc">
-                        School Adventure (week)
-                      </option>
-                      <option value="friend-arc">New Friend Mini‑Arc</option>
-                      <option value="store-arc">Helper at the Store</option>
+                      <option value="school-arc">{t("School Adventure (week)")}</option>
+                      <option value="friend-arc">{t("New Friend Mini‑Arc")}</option>
+                      <option value="store-arc">{t("Helper at the Store")}</option>
                     </select>
                   </div>
                   <div>
-                    <label className="block text-sm text-zinc-700">
-                      Reminder cadence
-                    </label>
+                    <label className="block text-sm text-zinc-700">{t("Reminder cadence")}</label>
                     <select
                       value={stageContinuity.cadence}
                       onChange={(e) =>
@@ -1390,13 +1286,13 @@ export default function StoryModules({
                       }
                       className="mt-1 w-full bg-white/90 border border-zinc-200 rounded-xl px-4 py-2"
                     >
-                      <option>Daily</option>
-                      <option>Every 2 days</option>
-                      <option>Weekly</option>
+                      <option>{t("Daily")}</option>
+                      <option>{t("Every 2 days")}</option>
+                      <option>{t("Weekly")}</option>
                     </select>
                   </div>
                   <div>
-                    <label className="block text-sm text-zinc-700">Badge</label>
+                    <label className="block text-sm text-zinc-700">{t("Badge")}</label>
                     <select
                       value={stageContinuity.badge}
                       onChange={(e) =>
@@ -1407,9 +1303,9 @@ export default function StoryModules({
                       }
                       className="mt-1 w-full bg-white/90 border border-zinc-200 rounded-xl px-4 py-2"
                     >
-                      <option value="bravery">Bravery Badge</option>
-                      <option value="sharing">Sharing Star</option>
-                      <option value="helper">Helpful Hero</option>
+                      <option value="bravery">{t("Bravery Badge")}</option>
+                      <option value="sharing">{t("Sharing Star")}</option>
+                      <option value="helper">{t("Helpful Hero")}</option>
                     </select>
                   </div>
                 </div>
@@ -1424,19 +1320,17 @@ export default function StoryModules({
               disabled={
                 aiGenerating || (aiRetryAt && (aiNow || Date.now()) < aiRetryAt)
               }
-              className="rounded-xl px-4 py-2 bg-[#5b217f] text-white hover:bg-[#7c2da3]"
+              className="rounded-xl px-4 py-2 bg-[#315e4a] text-white hover:bg-[#244a39]"
             >
               {aiGenerating
-                ? "Generating…"
+                ? t("Generating…")
                 : aiRetryAt && (aiNow || Date.now()) < aiRetryAt
-                ? `Rate limited (${Math.ceil(
-                    (aiRetryAt - (aiNow || Date.now())) / 1000
-                  )}s)`
-                : "Generate step with Ai"}{" "}
+                ? t("Rate limited ({seconds}s)", { seconds: Math.ceil((aiRetryAt - (aiNow || Date.now())) / 1000) })
+                : t("Generate step with Ai")}{" "}
               <Sparkles className="inline-block w-4 h-4 mb-1" />
             </button>
             {aiError ? (
-              <span role="alert" className="text-sm text-red-700">{aiError}</span>
+              <span role="alert" className="text-sm text-red-700">{t(aiError)}</span>
             ) : null}
           </div>
         </div>

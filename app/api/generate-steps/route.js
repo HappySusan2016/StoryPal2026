@@ -172,9 +172,9 @@ function tryParseJsonFromText(text) {
   }
 }
 
-/** @module 步骤生成请求时限 */
+/** @module Step generation request deadline */
 export async function POST(req) {
-  // 所有模型尝试和格式修复共用 50 秒预算，客户端断开时同步取消。
+  // All model attempts and format repairs share a 50-second budget. Cancel them when the client disconnects.
   const timeoutSignal = AbortSignal.timeout(50000);
   const signal = AbortSignal.any([req.signal, timeoutSignal]);
   let quota = null;
@@ -445,7 +445,7 @@ previousSteps: ${JSON.stringify(previousSteps)}
         headers: err.retryAfterSeconds ? { "Retry-After": String(err.retryAfterSeconds) } : {},
       });
     }
-    // 对外只返回简短原因，避免将上游错误正文暴露给页面。
+    // Return a brief reason to the page and keep the upstream error body private.
     console.error("Step generation failed", { message: err });
     return Response.json(
       { error: timeoutSignal.aborted
@@ -458,7 +458,7 @@ previousSteps: ${JSON.stringify(previousSteps)}
       try {
         await settleStepQuota(quota, false);
       } catch (error) {
-        // 释放失败时由预占时限兜底，不把失败请求记入成功次数。
+        // If release fails, let the reservation expire. Failed requests do not count as successes.
         console.error("Failed to release step quota", { code: error?.code });
       }
     }

@@ -1,32 +1,44 @@
 "use client";
 
-import { useEffect, useState, useMemo } from "react";
+import { calculateAnalyticsStats } from "../lib/telemetry";
+import PortalShell from "../components/PortalShell";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { onAuthStateChanged } from "firebase/auth";
 import {
   collection,
   query,
-  getDocs,
+  getDocsFromServer,
   orderBy,
   limit,
-  where,
   Timestamp,
 } from "firebase/firestore";
 import { auth, db } from "../lib/firebaseClient";
 import { useTranslation } from "../hooks/useTranslation";
 
+/** @module Portal styling for analytics with all metrics and details retained */
 export default function AnalyticsDashboard() {
+  return <PortalShell><AnalyticsContent /></PortalShell>;
+}
+
+/** @module Analytics queries, aggregation, and display */
+function AnalyticsContent() {
   const router = useRouter();
-  const { t } = useTranslation();
+  const { t, language } = useTranslation();
   const [authReady, setAuthReady] = useState(false);
   const [currentUser, setCurrentUser] = useState(null);
   const [loading, setLoading] = useState(true);
   const [stats, setStats] = useState(null);
   const [error, setError] = useState(null);
+  const [refreshVersion, setRefreshVersion] = useState(0);
+  const [telemetryStatus, setTelemetryStatus] = useState(null);
 
   // Require authenticated user
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, (user) => {
+      setStats(null);
+      setLoading(true);
+      setError(null);
       if (!user) {
         setAuthReady(false);
         setCurrentUser(null);
@@ -42,11 +54,25 @@ export default function AnalyticsDashboard() {
   // Load telemetry data
   useEffect(() => {
     if (!authReady || !currentUser) return;
+    let cancelled = false;
 
     async function loadAnalytics() {
       setLoading(true);
       setError(null);
       try {
+        // Wait for the initial batch or queued events to finish writing so the query does not return empty results prematurely.
+        let flushTimeout;
+        try {
+          // Firestore writes can wait for reconnection while offline. Keep the analytics page from loading indefinitely.
+          await Promise.race([
+            window.storypalTelemetry?.flush(),
+            new Promise(resolve => { flushTimeout = setTimeout(resolve, 5000); }),
+          ]);
+        } finally {
+          clearTimeout(flushTimeout);
+        }
+        if (cancelled) return;
+        setTelemetryStatus(window.storypalTelemetry?.getStatus() || null);
         const uid = currentUser.uid;
         const sessionsRef = collection(db, "users", uid, "telemetrySessions");
         const sessionsQuery = query(
@@ -55,7 +81,7 @@ export default function AnalyticsDashboard() {
           limit(100)
         );
 
-        const sessionsSnapshot = await getDocs(sessionsQuery);
+        const sessionsSnapshot = await getDocsFromServer(sessionsQuery);
         const sessions = [];
         const allEvents = [];
 
@@ -71,7 +97,7 @@ export default function AnalyticsDashboard() {
             "events"
           );
           const eventsQuery = query(eventsRef, orderBy("ts", "desc"));
-          const eventsSnapshot = await getDocs(eventsQuery);
+          const eventsSnapshot = await getDocsFromServer(eventsQuery);
 
           const events = eventsSnapshot.docs.map((doc) => ({
             id: doc.id,
@@ -88,8 +114,8 @@ export default function AnalyticsDashboard() {
         }
 
         // Calculate statistics
-        const stats = calculateStats(sessions, allEvents);
-        setStats(stats);
+        const stats = calculateAnalyticsStats(sessions, allEvents);
+        if (!cancelled) setStats(stats);
       } catch (err) {
         console.error("Failed to load analytics", err);
         let errorMessage = err.message || "Failed to load analytics data";
@@ -101,101 +127,21 @@ export default function AnalyticsDashboard() {
           errorMessage =
             "Firestore index required. Check the Firebase Console for index creation link, or wait a moment for auto-indexing.";
         }
-        setError(errorMessage);
+        if (!cancelled) setError(errorMessage);
       } finally {
-        setLoading(false);
+        if (!cancelled) setLoading(false);
       }
     }
 
     loadAnalytics();
-  }, [authReady, currentUser]);
-
-  function calculateStats(sessions, events) {
-    const byType = {};
-    const byPath = {};
-    const byClickName = {};
-    const errors = [];
-    const pageTimes = [];
-    let totalVisibleMs = 0;
-    let totalTimeMs = 0;
-    let pageTimeCount = 0;
-
-    events.forEach((event) => {
-      // Count by type
-      byType[event.type] = (byType[event.type] || 0) + 1;
-
-      // Count by path
-      if (event.path) {
-        byPath[event.path] = (byPath[event.path] || 0) + 1;
-      }
-
-      // Count clicks by name
-      if (event.type === "click" && event.name) {
-        byClickName[event.name] = (byClickName[event.name] || 0) + 1;
-      }
-
-      // Collect errors
-      if (event.type === "error" || event.type === "unhandledrejection") {
-        errors.push({
-          message: event.message || "Unknown error",
-          path: event.path || "unknown",
-          ts: event.ts,
-          filename: event.filename,
-          lineno: event.lineno,
-        });
-      }
-
-      // Collect page time stats
-      if (event.type === "page_time") {
-        if (event.visibleMs) {
-          totalVisibleMs += event.visibleMs;
-          pageTimeCount++;
-        }
-        if (event.totalMs) {
-          totalTimeMs += event.totalMs;
-        }
-        pageTimes.push({
-          fromPath: event.fromPath || "unknown",
-          toPath: event.toPath || "unknown",
-          visibleMs: event.visibleMs || 0,
-          totalMs: event.totalMs || 0,
-          ts: event.ts,
-        });
-      }
-    });
-
-    // Sort click names by count
-    const topClicks = Object.entries(byClickName)
-      .sort((a, b) => b[1] - a[1])
-      .slice(0, 10);
-
-    // Sort paths by count
-    const topPaths = Object.entries(byPath)
-      .sort((a, b) => b[1] - a[1])
-      .slice(0, 10);
-
-    return {
-      totalSessions: sessions.length,
-      totalEvents: events.length,
-      byType,
-      byPath,
-      topClicks,
-      topPaths,
-      errors: errors.slice(0, 20), // Last 20 errors
-      pageTimes,
-      avgVisibleMs: pageTimeCount > 0 ? totalVisibleMs / pageTimeCount : 0,
-      avgTotalMs: pageTimeCount > 0 ? totalTimeMs / pageTimeCount : 0,
-      recentEvents: events
-        .sort((a, b) => (b.ts || 0) - (a.ts || 0))
-        .slice(0, 50),
-    };
-  }
+    return () => { cancelled = true; };
+  }, [authReady, currentUser, refreshVersion]);
 
   function formatTimestamp(ts) {
     if (!ts) return "Unknown";
     try {
       const date = ts instanceof Timestamp ? ts.toDate() : new Date(ts);
-      return date.toLocaleString();
+      return date.toLocaleString(language);
     } catch {
       return "Invalid date";
     }
@@ -211,12 +157,29 @@ export default function AnalyticsDashboard() {
     return `${seconds}s`;
   }
 
+  /** @module Refresh and collection diagnostics distinguish disabled tracking or failed writes from empty results */
+  const analyticsHeader = (
+    <div className="section-head analytics-head">
+      <h1>{t("Analytics Dashboard")}</h1>
+      <button className="secondary" type="button" disabled={loading} onClick={() => setRefreshVersion(version => version + 1)} data-telemetry="analytics_refresh">
+        {t("Refresh")}
+      </button>
+    </div>
+  );
+  const trackingMessage = telemetryStatus?.lastError
+    ? "Activity could not be saved. Please check your connection or access permissions."
+    : telemetryStatus?.configured === false
+    ? "Activity tracking is currently disabled."
+    : telemetryStatus?.enabled === false
+    ? "This session is not included in activity tracking."
+    : "Activity tracking is ready. Browse a few pages, then refresh.";
+
   if (!authReady || loading) {
     return (
-      <main className="min-h-screen bg-background px-6 py-8">
+      <main className="analytics-page">
         <div className="max-w-7xl mx-auto">
           <div className="text-center py-12">
-            <div className="text-lg text-zinc-600">Loading analytics...</div>
+            <div className="text-lg text-zinc-600">{t("Loading analytics...")}</div>
           </div>
         </div>
       </main>
@@ -225,11 +188,12 @@ export default function AnalyticsDashboard() {
 
   if (error) {
     return (
-      <main className="min-h-screen bg-background px-6 py-8">
+      <main className="analytics-page">
         <div className="max-w-7xl mx-auto">
+          {analyticsHeader}
           <div className="rounded-xl border border-red-200 bg-red-50 text-red-800 p-4">
-            <h2 className="font-semibold mb-2">Error loading analytics</h2>
-            <p className="text-sm">{error}</p>
+            <h2 className="font-semibold mb-2">{t("Error loading analytics")}</h2>
+            <p className="text-sm">{t(error)}</p>
           </div>
         </div>
       </main>
@@ -238,58 +202,33 @@ export default function AnalyticsDashboard() {
 
   if (!stats || stats.totalSessions === 0) {
     return (
-      <main className="min-h-screen bg-background px-6 py-8">
+      <main className="analytics-page">
         <div className="max-w-7xl mx-auto">
-          <h1 className="text-4xl font-semibold text-zinc-900 mb-4">
-            Analytics Dashboard
-          </h1>
+          {analyticsHeader}
           <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-8">
-            <p className="text-zinc-600 mb-4">
-              No telemetry data available yet. Start using the app to generate
-              analytics.
+            <p className="text-zinc-600 mb-4">{t("No telemetry data available yet. Start using the app to generate analytics.")}</p>
+            <p className="notice" role={telemetryStatus?.lastError ? "alert" : "status"}>
+              {t(trackingMessage)} {telemetryStatus?.lastError && <code>{telemetryStatus.lastError}</code>}
             </p>
+            <details className="analytics-troubleshooting"><summary>{t("Troubleshooting Steps:")}</summary>
             <div className="bg-white rounded-lg p-4 border border-zinc-200">
-              <h3 className="font-semibold text-zinc-900 mb-2">
-                Troubleshooting Steps:
-              </h3>
+              <h3 className="font-semibold text-zinc-900 mb-2">{t("Troubleshooting Steps:")}</h3>
               <ol className="list-decimal list-inside space-y-2 text-sm text-zinc-700">
-                <li>
-                  Open browser console (F12) and check for{" "}
-                  <code className="bg-zinc-100 px-1 rounded">
-                    [Telemetry]
-                  </code>{" "}
-                  messages
-                </li>
-                <li>
-                  Verify telemetry is enabled: Check if{" "}
-                  <code className="bg-zinc-100 px-1 rounded">
-                    window.storypalTelemetry
-                  </code>{" "}
-                  exists in console
-                </li>
-                <li>
-                  Make sure you're signed in (telemetry only works for
-                  authenticated users)
-                </li>
-                <li>
-                  Navigate between pages and click buttons to generate events
-                </li>
-                <li>
-                  Wait 5-10 seconds for events to flush to Firestore
-                </li>
-                <li>
-                  Check Firestore Console:{" "}
-                  <code className="bg-zinc-100 px-1 rounded">
-                    users/{currentUser?.uid}/telemetrySessions
-                  </code>
+                <li>{t("Open browser console (F12) and check for")}{" "}
+                  <code className="bg-zinc-100 px-1 rounded">{t("[Telemetry]")}</code>{" "}{t("messages")}</li>
+                <li>{t("Verify telemetry is enabled: Check if")}{" "}
+                  <code className="bg-zinc-100 px-1 rounded">{t("window.storypalTelemetry")}</code>{" "}{t("exists in console")}</li>
+                <li>{t("Make sure you're signed in (telemetry only works for authenticated users)")}</li>
+                <li>{t("Navigate between pages and click buttons to generate events")}</li>
+                <li>{t("Wait 5-10 seconds for events to flush to Firestore")}</li>
+                <li>{t("Check Firestore Console:")}{" "}
+                  <code className="bg-zinc-100 px-1 rounded">{t("users/")}{currentUser?.uid}{t("/telemetrySessions")}</code>
                 </li>
               </ol>
             </div>
+            </details>
             <p className="text-sm text-zinc-500 mt-4">
-              <strong>Note:</strong> This is a custom analytics dashboard that
-              reads from Firestore. It's different from Firebase Analytics
-              (Google Analytics) shown in the Firebase Console.
-            </p>
+              <strong>{t("Note:")}</strong>{t("This is a custom analytics dashboard that reads from Firestore. It's different from Firebase Analytics (Google Analytics) shown in the Firebase Console.")}</p>
           </div>
         </div>
       </main>
@@ -297,37 +236,33 @@ export default function AnalyticsDashboard() {
   }
 
   return (
-    <main className="min-h-screen bg-background px-6 py-8">
+    <main className="analytics-page">
       <div className="max-w-7xl mx-auto">
-        <h1 className="text-4xl font-semibold text-zinc-900 mb-2">
-          Analytics Dashboard
-        </h1>
-        <p className="text-zinc-600 mb-6">
-          Telemetry data and user interaction analytics
-        </p>
+        {analyticsHeader}
+        <p className="text-zinc-600 mb-6">{t("Telemetry data and user interaction analytics")}</p>
 
         {/* Overview Stats */}
         <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
           <div className="rounded-2xl bg-white/80 backdrop-blur p-5 shadow-sm border border-zinc-200">
-            <div className="text-sm text-zinc-600 mb-1">Total Sessions</div>
+            <div className="text-sm text-zinc-600 mb-1">{t("Total Sessions")}</div>
             <div className="text-3xl font-bold text-zinc-900">
               {stats.totalSessions}
             </div>
           </div>
           <div className="rounded-2xl bg-white/80 backdrop-blur p-5 shadow-sm border border-zinc-200">
-            <div className="text-sm text-zinc-600 mb-1">Total Events</div>
+            <div className="text-sm text-zinc-600 mb-1">{t("Total Events")}</div>
             <div className="text-3xl font-bold text-zinc-900">
               {stats.totalEvents}
             </div>
           </div>
           <div className="rounded-2xl bg-white/80 backdrop-blur p-5 shadow-sm border border-zinc-200">
-            <div className="text-sm text-zinc-600 mb-1">Avg Time on Page</div>
+            <div className="text-sm text-zinc-600 mb-1">{t("Avg Time on Page")}</div>
             <div className="text-3xl font-bold text-zinc-900">
               {formatDuration(stats.avgVisibleMs)}
             </div>
           </div>
           <div className="rounded-2xl bg-white/80 backdrop-blur p-5 shadow-sm border border-zinc-200">
-            <div className="text-sm text-zinc-600 mb-1">Errors</div>
+            <div className="text-sm text-zinc-600 mb-1">{t("Errors")}</div>
             <div className="text-3xl font-bold text-red-600">
               {stats.errors.length}
             </div>
@@ -337,9 +272,7 @@ export default function AnalyticsDashboard() {
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
           {/* Events by Type */}
           <div className="rounded-2xl bg-white/80 backdrop-blur p-5 shadow-sm border border-zinc-200">
-            <h2 className="text-xl font-semibold text-zinc-900 mb-4">
-              Events by Type
-            </h2>
+            <h2 className="text-xl font-semibold text-zinc-900 mb-4">{t("Events by Type")}</h2>
             <div className="space-y-2">
               {Object.entries(stats.byType)
                 .sort((a, b) => b[1] - a[1])
@@ -351,7 +284,7 @@ export default function AnalyticsDashboard() {
                     <div className="flex items-center gap-3">
                       <div className="w-32 bg-zinc-100 rounded-full h-2">
                         <div
-                          className="bg-[#5b217f] h-2 rounded-full"
+                          className="bg-[#315e4a] h-2 rounded-full"
                           style={{
                             width: `${(count / stats.totalEvents) * 100}%`,
                           }}
@@ -368,9 +301,7 @@ export default function AnalyticsDashboard() {
 
           {/* Most Clicked Actions */}
           <div className="rounded-2xl bg-white/80 backdrop-blur p-5 shadow-sm border border-zinc-200">
-            <h2 className="text-xl font-semibold text-zinc-900 mb-4">
-              Most Clicked Actions
-            </h2>
+            <h2 className="text-xl font-semibold text-zinc-900 mb-4">{t("Most Clicked Actions")}</h2>
             {stats.topClicks.length > 0 ? (
               <div className="space-y-2">
                 {stats.topClicks.map(([name, count]) => (
@@ -388,7 +319,7 @@ export default function AnalyticsDashboard() {
                 ))}
               </div>
             ) : (
-              <p className="text-sm text-zinc-500">No click data available</p>
+              <p className="text-sm text-zinc-500">{t("No click data available")}</p>
             )}
           </div>
         </div>
@@ -396,9 +327,7 @@ export default function AnalyticsDashboard() {
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
           {/* Page Views by Path */}
           <div className="rounded-2xl bg-white/80 backdrop-blur p-5 shadow-sm border border-zinc-200">
-            <h2 className="text-xl font-semibold text-zinc-900 mb-4">
-              Page Views by Path
-            </h2>
+            <h2 className="text-xl font-semibold text-zinc-900 mb-4">{t("Page Views by Path")}</h2>
             {stats.topPaths.length > 0 ? (
               <div className="space-y-2">
                 {stats.topPaths.map(([path, count]) => (
@@ -416,36 +345,28 @@ export default function AnalyticsDashboard() {
                 ))}
               </div>
             ) : (
-              <p className="text-sm text-zinc-500">No page view data</p>
+              <p className="text-sm text-zinc-500">{t("No page view data")}</p>
             )}
           </div>
 
           {/* Time on Page Stats */}
           <div className="rounded-2xl bg-white/80 backdrop-blur p-5 shadow-sm border border-zinc-200">
-            <h2 className="text-xl font-semibold text-zinc-900 mb-4">
-              Time on Page
-            </h2>
+            <h2 className="text-xl font-semibold text-zinc-900 mb-4">{t("Time on Page")}</h2>
             <div className="space-y-3">
               <div>
-                <div className="text-sm text-zinc-600 mb-1">
-                  Average Visible Time
-                </div>
+                <div className="text-sm text-zinc-600 mb-1">{t("Average Visible Time")}</div>
                 <div className="text-2xl font-bold text-zinc-900">
                   {formatDuration(stats.avgVisibleMs)}
                 </div>
               </div>
               <div>
-                <div className="text-sm text-zinc-600 mb-1">
-                  Average Total Time
-                </div>
+                <div className="text-sm text-zinc-600 mb-1">{t("Average Total Time")}</div>
                 <div className="text-2xl font-bold text-zinc-900">
                   {formatDuration(stats.avgTotalMs)}
                 </div>
               </div>
               <div>
-                <div className="text-sm text-zinc-600 mb-1">
-                  Page Time Events
-                </div>
+                <div className="text-sm text-zinc-600 mb-1">{t("Page Time Events")}</div>
                 <div className="text-2xl font-bold text-zinc-900">
                   {stats.pageTimes.length}
                 </div>
@@ -457,8 +378,7 @@ export default function AnalyticsDashboard() {
         {/* Error Logs */}
         {stats.errors.length > 0 && (
           <div className="rounded-2xl bg-white/80 backdrop-blur p-5 shadow-sm border border-zinc-200 mb-6">
-            <h2 className="text-xl font-semibold text-zinc-900 mb-4">
-              Recent Errors ({stats.errors.length})
+            <h2 className="text-xl font-semibold text-zinc-900 mb-4">{t("Recent Errors (")}{stats.errors.length})
             </h2>
             <div className="space-y-3 max-h-96 overflow-y-auto">
               {stats.errors.map((err, idx) => (
@@ -474,8 +394,7 @@ export default function AnalyticsDashboard() {
                       {formatTimestamp(err.ts)}
                     </span>
                   </div>
-                  <div className="text-xs text-red-700 mt-1">
-                    Path: {err.path}
+                  <div className="text-xs text-red-700 mt-1">{t("Path:")}{err.path}
                     {err.filename && ` • File: ${err.filename}`}
                     {err.lineno && ` • Line: ${err.lineno}`}
                   </div>
@@ -487,9 +406,7 @@ export default function AnalyticsDashboard() {
 
         {/* Recent Activity */}
         <div className="rounded-2xl bg-white/80 backdrop-blur p-5 shadow-sm border border-zinc-200">
-          <h2 className="text-xl font-semibold text-zinc-900 mb-4">
-            Recent Activity (Last 50 Events)
-          </h2>
+          <h2 className="text-xl font-semibold text-zinc-900 mb-4">{t("Recent Activity (Last 50 Events)")}</h2>
           <div className="space-y-2 max-h-96 overflow-y-auto">
             {stats.recentEvents.map((event, idx) => (
               <div

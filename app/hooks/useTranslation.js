@@ -9,22 +9,22 @@ export function useTranslation() {
   useEffect(() => {
     if (typeof window !== "undefined") {
       const saved = window.localStorage.getItem("sp.siteLanguage") || "en";
-      setLanguage(saved);
-      
+      queueMicrotask(() => setLanguage(saved));
+
       // Listen for language changes
       const handleLanguageChange = (e) => {
         setLanguage(e.detail || saved);
       };
-      
+
       const handleStorageChange = (e) => {
         if (e.key === "sp.siteLanguage") {
           setLanguage(e.newValue || "en");
         }
       };
-      
+
       window.addEventListener("languagechange", handleLanguageChange);
       window.addEventListener("storage", handleStorageChange);
-      
+
       return () => {
         window.removeEventListener("languagechange", handleLanguageChange);
         window.removeEventListener("storage", handleStorageChange);
@@ -32,11 +32,15 @@ export function useTranslation() {
     }
   }, []);
 
-  const t = (key) => {
+  /** @module Translation fallback and parameter interpolation */
+  const t = (key, values = {}) => {
     const langTranslations = translations[language] || translations.en;
-    return langTranslations[key] || key;
+    const text = langTranslations[key] || translations.en[key] || key;
+    return text.replace(
+      /\{(\w+)\}|\$(\w+)/g,
+      (match, braced, dollar) => values[braced || dollar] ?? match,
+    );
   };
 
   return { t, language };
 }
-

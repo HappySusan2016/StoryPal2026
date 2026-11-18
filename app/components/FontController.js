@@ -28,6 +28,12 @@ export default function FontController() {
     
     apply(window.localStorage.getItem(key) || "classic");
     
+    // Override the legacy player's text size only after the user selects a reading size.
+    const applyTextSize = () => document.documentElement.setAttribute("data-story-text-size", window.localStorage.getItem("sp.storyTextSize") || "normal");
+    applyTextSize();
+    window.addEventListener("storytextchange", applyTextSize);
+    window.addEventListener("storage", applyTextSize);
+
     // Listen to storage events (cross-tab)
     const onStorage = (e) => {
       if (e.key === key) apply(e.newValue);
@@ -42,6 +48,8 @@ export default function FontController() {
     window.addEventListener("fontchange", onFontChange);
     
     return () => {
+      window.removeEventListener("storytextchange", applyTextSize);
+      window.removeEventListener("storage", applyTextSize);
       window.removeEventListener("storage", onStorage);
       window.removeEventListener("fontchange", onFontChange);
     };

@@ -3,9 +3,9 @@ import { isValidParentGuide } from "@/app/lib/parentGuides";
 
 export const runtime = "nodejs";
 
-/** @module 引导生成与响应校验 */
+/** @module Guide generation and response validation */
 export async function POST(req) {
-  // 所有候选模型共享时限，并响应客户端取消，避免后台继续生成。
+  // All candidate models share a deadline. Cancel generation when the client aborts.
   const timeoutSignal = AbortSignal.timeout(50000);
   const signal = AbortSignal.any([req.signal, timeoutSignal]);
   try {
@@ -111,7 +111,7 @@ Generate a co-action prompt for this story step.`;
           }
         );
         if (!response.ok) {
-          // 保留状态码和错误正文，供现有配额判断与模型回退逻辑使用。
+          // Preserve the status code and error body for quota checks and model fallback.
           const errorText = await response.text();
           throw new Error(`Gemini ${response.status}: ${errorText}`);
         }

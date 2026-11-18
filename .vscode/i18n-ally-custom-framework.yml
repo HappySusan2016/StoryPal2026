@@ -1,4 +1,4 @@
-# 识别自定义 Hook 返回的 t，只匹配静态字符串参数。
+# Recognize the t function returned by the custom hook and match only static string arguments.
 languageIds:
   - javascript
   - javascriptreact

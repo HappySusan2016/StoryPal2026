@@ -19,8 +19,11 @@ export default function SiteHeader() {
     }
   };
 
+  // Portal pages use dedicated navigation while legacy feature pages keep their original navigation.
+  if (["/child", "/analytics", "/", "/settings", "/login", "/signup", "/terms", "/privacy", "/parent", "/parent/auth"].includes(pathname) || pathname?.startsWith("/profiles/")) return null;
+
   return (
-    <header className="sticky top-0 z-40 w-full backdrop-blur supports-[backdrop-filter]:bg-white/60 bg-white/70 border-b border-[#e8e2cf]">
+    <header className="sticky top-0 z-40 w-full backdrop-blur supports-[backdrop-filter]:bg-white/60 bg-[#fbf7ef]/95 border-b border-[#e8e2cf]">
       <div className="mx-auto max-w-7xl px-4 py-3 flex items-center justify-between">
         <Link
           href="/"
@@ -34,12 +37,12 @@ export default function SiteHeader() {
             height={36}
             className="w-9 h-9 object-contain"
           />
-          <span className="text-2xl font-extrabold tracking-wide text-[#5b217f] group-hover:text-[#7c2da3] transition-colors">
+          <span className="text-2xl font-extrabold tracking-wide text-[#315e4a] group-hover:text-[#244a39] transition-colors">
             StoryPal
           </span>
         </Link>
         <div className="flex items-center gap-6">
-          <nav className="hidden md:flex items-center gap-6 text-[#5b217f]">
+          <nav className="hidden md:flex items-center gap-6 text-[#315e4a]">
             <Link
               href="/"
               data-telemetry="nav_home"
@@ -74,7 +77,7 @@ export default function SiteHeader() {
             type="button"
             onClick={triggerLogout}
             data-telemetry="auth_logout"
-            className="text-[#5b217f] hover:text-[#967ba7] transition-colors"
+            className="text-[#315e4a] hover:text-[#8aab87] transition-colors"
             title={t("logout")}
             aria-label={t("logout")}
           >

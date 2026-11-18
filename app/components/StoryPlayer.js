@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useMemo, useEffect, useRef } from "react";
+import { useTranslation } from "../hooks/useTranslation";
 import Image from "next/image";
 import { flushSync } from "react-dom";
 import { printStoryPages } from "./printStoryPages";
@@ -23,7 +24,9 @@ export default function StoryPlayer({
   preferredVoice = "female",
   childId = null,
   onStarsCollected,
+  onPageConfirmed,
 }) {
+  const { t } = useTranslation();
   const title = moduleDefinition?.title || "Story";
   const coverImage = moduleDefinition?.coverImage || "";
   const moduleId = moduleDefinition?.id || "";
@@ -320,12 +323,16 @@ export default function StoryPlayer({
     onClose?.();
   }
 
+  /** @module Confirm the current reading page and advance the story */
   function handleNext() {
+    if (!currentStep || showCelebration) return;
     if (currentStep?.type === "user-input" && !userInputValue.trim()) return;
     if (currentStep?.type === "choice" && !selectedChoice) return;
 
+    onPageConfirmed?.(currentStepIndex, isLastStep);
     if (!isLastStep) {
-      setCurrentStepIndex((idx) => idx + 1);
+      // Repeated triggers on the same page only advance to the next page.
+      setCurrentStepIndex(currentStepIndex + 1);
       resetTransientState();
     } else {
       // Show celebration screen on last step completion
@@ -350,10 +357,10 @@ export default function StoryPlayer({
     }, 1500);
   }
 
-  /** @module 父母引导生成与异常回退 */
+  /** @module Parent guide generation and fallback */
   const [aiGuides, setAiGuides] = useState({});
   const [guideRequest, setGuideRequest] = useState(null);
-  // 使用完整内容与儿童上下文区分缓存，避免复用另一故事或儿童的引导。
+  // Key the cache on the full content and child context so guides are not reused across stories or children.
   const guideRequestBody = JSON.stringify({
     stepType: currentStep?.type,
     stepMessage: currentStep?.message || "",
@@ -374,7 +381,7 @@ export default function StoryPlayer({
     const signal = AbortSignal.any([controller.signal, AbortSignal.timeout(60000)]);
     let active = true;
 
-    /** 缺失或无效的已有引导先尝试生成，失败后才使用默认引导。 */
+    /** Try generating missing or invalid guides before falling back to the default guide. */
     async function generateGuide() {
       setGuideRequest({ key: stepKey, status: "loading", error: null });
       let errorMessage = null;
@@ -391,7 +398,7 @@ export default function StoryPlayer({
           throw new Error("AI returned invalid guidance. Default guidance is being used.");
         }
         if (!active) return;
-        // 只缓存经过验证的约定字段，不信任模型返回的额外数据。
+        // Cache only validated fields from the expected schema and discard extra model output.
         const { title, description, coActionPrompt } = data.guide;
         setAiGuides((prev) => ({ ...prev, [stepKey]: { title, description, coActionPrompt } }));
       } catch {
@@ -400,7 +407,7 @@ export default function StoryPlayer({
           ? "AI guidance timed out. Default guidance is being used."
           : "AI guidance could not be generated. Default guidance is being used.";
       } finally {
-        // 切换步骤或关闭播放器后，旧请求不得覆盖当前步骤状态。
+        // Ignore stale requests after switching steps or closing the player.
         if (active) setGuideRequest({ key: stepKey, status: "finished", error: errorMessage });
       }
     }
@@ -464,7 +471,7 @@ export default function StoryPlayer({
     return null;
   }, [currentStep, cachedGuide, loadingGuide]);
 
-  /** @module 绘本内容展示 */
+  /** @module Storybook content display */
   function renderStoryContent(step, isPrintPage = false) {
     return (
       <>
@@ -490,7 +497,7 @@ export default function StoryPlayer({
                 >
                   <path d="M9 6a3 3 0 11-6 0 3 3 0 016 0zM17 6a3 3 0 11-6 0 3 3 0 016 0zM12.93 17c.046-.327.07-.66.07-1a6.97 6.97 0 00-1.5-4.33A5 5 0 0119 16v1h-6.07zM6 11a5 5 0 015 5v1H1v-1a5 5 0 015-5z" />
                 </svg>
-                <span className="text-lg font-semibold">Parent Training</span>
+                <span className="text-lg font-semibold">{t("Parent Training")}</span>
               </div>
             </div>
           ) : null}
@@ -515,7 +522,7 @@ export default function StoryPlayer({
                 )}
 
                 {step.type === "doctor" && (
-                  <div className="bg-[#f5f0ff] rounded-2xl p-4 border border-[#e4d7ff]">
+                  <div className="bg-[#f5f0ff] rounded-2xl p-4 border border-[#e5eee4]">
                     <p
                       className="text-zinc-900 text-lg leading-relaxed"
                       style={fontStyle}
@@ -527,7 +534,7 @@ export default function StoryPlayer({
 
                 {step.type === "user-input" && (
                   <div className="space-y-3">
-                    <div className="bg-[#f5f0ff] rounded-2xl p-4 border border-[#e4d7ff]">
+                    <div className="bg-[#f5f0ff] rounded-2xl p-4 border border-[#e5eee4]">
                       <p
                         className="text-zinc-900 text-lg mb-2"
                         style={fontStyle}
@@ -557,7 +564,7 @@ export default function StoryPlayer({
                 {step.type === "choice" &&
                   Array.isArray(step.options) && (
                     <div className="space-y-3">
-                      <div className="bg-[#f5f0ff] rounded-2xl p-4 border border-[#e4d7ff]">
+                      <div className="bg-[#f5f0ff] rounded-2xl p-4 border border-[#e5eee4]">
                         <p
                           className="text-zinc-900 text-lg mb-2"
                           style={fontStyle}
@@ -575,7 +582,7 @@ export default function StoryPlayer({
                               onClick={() => setSelectedChoice(label)}
                               className={`rounded-xl px-4 py-3 text-sm font-medium transition-all ${
                                 (!isPrintPage || step === currentStep) && selectedChoice === label
-                                  ? "bg-[#5b217f] text-white shadow-md"
+                                  ? "bg-[#315e4a] text-white shadow-md"
                                   : "bg-zinc-100 text-zinc-700 hover:bg-zinc-200"
                               }`}
                               style={fontStyle}
@@ -595,13 +602,13 @@ export default function StoryPlayer({
     );
   }
 
-  /** @module 绘本打印 */
+  /** @module Storybook printing */
   const printPagesRef = useRef(null);
   const printingRef = useRef(false);
   const [isPrinting, setIsPrinting] = useState(false);
   const [printError, setPrintError] = useState("");
 
-  // 单独渲染全部页，避免翻页、朗读及奖励等阅读副作用。
+  // Render all pages separately to avoid reading side effects such as page turns, narration, and rewards.
   async function handlePrint() {
     if (printingRef.current || !steps.length) return;
     printingRef.current = true;
@@ -621,7 +628,7 @@ export default function StoryPlayer({
     }
   }
 
-  // 所有 Hook 执行后再处理空绘本，保证调用顺序稳定。
+  // Handle empty storybooks after calling all hooks to keep hook order stable.
   if (!Array.isArray(steps) || steps.length === 0) return null;
 
   return (
@@ -633,14 +640,14 @@ export default function StoryPlayer({
       <div className="relative z-10 w-full max-w-6xl max-h-[90vh] min-h-[600px] rounded-2xl bg-white shadow-lg animate-[fadeInUp_200ms_ease-out] flex flex-col lg:flex-row overflow-hidden story-player-content">
         {/* Main Story Content */}
         <div className="flex-1 flex flex-col overflow-y-auto relative">
-          {/* 打印入口位于音频设置左侧，全部控制按钮不进入打印内容。 */}
+          {/* Place the print button to the left of audio settings and omit all controls from print output. */}
           <button
             type="button"
             onClick={handlePrint}
             disabled={isPrinting || !steps.length}
             className="hidden lg:flex absolute top-4 right-28 z-10 w-10 h-10 rounded-full bg-white/80 hover:bg-white shadow-md items-center justify-center text-zinc-700 disabled:opacity-50"
-            aria-label="Print"
-            title="Print"
+            aria-label={t("Print")}
+            title={t("Print")}
           >
             <Printer className="w-5 h-5" />
           </button>
@@ -661,7 +668,7 @@ export default function StoryPlayer({
             type="button"
             onClick={handleClose}
             className="hidden lg:flex absolute top-4 right-4 z-10 w-10 h-10 rounded-full bg-white/80 backdrop-blur-sm hover:bg-white shadow-md items-center justify-center text-zinc-700 hover:text-zinc-900 transition-all"
-            aria-label="Close"
+            aria-label={t("Close")}
           >
             <svg
               xmlns="http://www.w3.org/2000/svg"
@@ -682,7 +689,7 @@ export default function StoryPlayer({
             type="button"
             onClick={() => setShowAudioControls(!showAudioControls)}
             className="hidden lg:flex absolute top-4 right-16 z-10 w-10 h-10 rounded-full bg-white/80 backdrop-blur-sm hover:bg-white shadow-md items-center justify-center text-zinc-700 hover:text-zinc-900 transition-all"
-            aria-label="Audio Settings"
+            aria-label={t("Audio Settings")}
           >
             <svg
               xmlns="http://www.w3.org/2000/svg"
@@ -703,9 +710,7 @@ export default function StoryPlayer({
             <div className="hidden lg:block absolute top-16 right-4 z-20 w-64 bg-white rounded-xl shadow-lg border border-zinc-200 p-4">
               <div className="space-y-4">
                 <div className="flex items-center justify-between">
-                  <h3 className="text-sm font-semibold text-zinc-900">
-                    Audio Settings
-                  </h3>
+                  <h3 className="text-sm font-semibold text-zinc-900">{t("Audio Settings")}</h3>
                   <button
                     type="button"
                     onClick={() => setShowAudioControls(false)}
@@ -728,7 +733,7 @@ export default function StoryPlayer({
 
                 {/* Enable/Disable Audio */}
                 <div className="flex items-center justify-between">
-                  <label className="text-sm text-zinc-700">Enable Audio</label>
+                  <label className="text-sm text-zinc-700">{t("Enable Audio")}</label>
                   <button
                     type="button"
                     onClick={() => {
@@ -749,9 +754,7 @@ export default function StoryPlayer({
 
                 {/* Voice Selection */}
                 <div>
-                  <label className="block text-sm text-zinc-700 mb-2">
-                    Voice
-                  </label>
+                  <label className="block text-sm text-zinc-700 mb-2">{t("Voice")}</label>
                   <div className="flex gap-2">
                     <button
                       type="button"
@@ -774,9 +777,7 @@ export default function StoryPlayer({
                           ? "bg-blue-600 text-white"
                           : "bg-zinc-100 text-zinc-700 hover:bg-zinc-200"
                       }`}
-                    >
-                      Female
-                    </button>
+                    >{t("Female")}</button>
                     <button
                       type="button"
                       onClick={() => {
@@ -798,17 +799,13 @@ export default function StoryPlayer({
                           ? "bg-blue-600 text-white"
                           : "bg-zinc-100 text-zinc-700 hover:bg-zinc-200"
                       }`}
-                    >
-                      Male
-                    </button>
+                    >{t("Male")}</button>
                   </div>
                 </div>
 
                 {/* Speed Selection */}
                 <div>
-                  <label className="block text-sm text-zinc-700 mb-2">
-                    Speed
-                  </label>
+                  <label className="block text-sm text-zinc-700 mb-2">{t("Speed")}</label>
                   <div className="flex gap-2">
                     <button
                       type="button"
@@ -831,9 +828,7 @@ export default function StoryPlayer({
                           ? "bg-blue-600 text-white"
                           : "bg-zinc-100 text-zinc-700 hover:bg-zinc-200"
                       }`}
-                    >
-                      Slow
-                    </button>
+                    >{t("Slow")}</button>
                     <button
                       type="button"
                       onClick={() => {
@@ -855,9 +850,7 @@ export default function StoryPlayer({
                           ? "bg-blue-600 text-white"
                           : "bg-zinc-100 text-zinc-700 hover:bg-zinc-200"
                       }`}
-                    >
-                      Normal
-                    </button>
+                    >{t("Normal")}</button>
                     <button
                       type="button"
                       onClick={() => {
@@ -879,9 +872,7 @@ export default function StoryPlayer({
                           ? "bg-blue-600 text-white"
                           : "bg-zinc-100 text-zinc-700 hover:bg-zinc-200"
                       }`}
-                    >
-                      Fast
-                    </button>
+                    >{t("Fast")}</button>
                   </div>
                 </div>
 
@@ -913,15 +904,13 @@ export default function StoryPlayer({
                       }}
                       className="flex-1 px-3 py-2 bg-blue-50 hover:bg-blue-100 text-blue-700 rounded-lg text-sm font-medium transition-colors"
                     >
-                      {isPaused ? "Resume" : (isSpeaking ? "Pause" : "Play")}
+                      {isPaused ? t("Resume") : (isSpeaking ? t("Pause") : t("Play"))}
                     </button>
                     <button
                       type="button"
                       onClick={stopSpeaking}
                       className="px-3 py-2 bg-zinc-100 hover:bg-zinc-200 text-zinc-700 rounded-lg text-sm font-medium transition-colors"
-                    >
-                      Stop
-                    </button>
+                    >{t("Stop")}</button>
                   </div>
                 )}
               </div>
@@ -934,14 +923,14 @@ export default function StoryPlayer({
               <div>
                 <div className="flex justify-between items-center pt-4 border-t border-zinc-200 lg:hidden">
                   <div className="flex items-center gap-2">
-                    <button type="button" onClick={handlePrint} disabled={isPrinting || !steps.length} aria-label="Print" className="rounded-xl px-3 py-2 text-zinc-700 hover:bg-zinc-100 disabled:opacity-50">
+                    <button type="button" onClick={handlePrint} disabled={isPrinting || !steps.length} aria-label={t("Print")} className="rounded-xl px-3 py-2 text-zinc-700 hover:bg-zinc-100 disabled:opacity-50">
                       <Printer className="w-5 h-5" />
                     </button>
                     <button
                       type="button"
                       onClick={() => setShowAudioControls(!showAudioControls)}
                       className="rounded-xl px-3 py-2 text-zinc-700 hover:bg-zinc-100"
-                      aria-label="Audio Settings"
+                      aria-label={t("Audio Settings")}
                     >
                       <svg
                         xmlns="http://www.w3.org/2000/svg"
@@ -960,9 +949,7 @@ export default function StoryPlayer({
                       type="button"
                       onClick={handleClose}
                       className="rounded-xl px-4 py-2 text-zinc-700 hover:bg-zinc-100"
-                    >
-                      Close
-                    </button>
+                    >{t("Close")}</button>
                   </div>
                   <div className="flex items-center gap-2">
                     <button
@@ -975,9 +962,7 @@ export default function StoryPlayer({
                       }}
                       disabled={currentStepIndex === 0}
                       className="rounded-xl px-4 py-2 text-zinc-700 hover:bg-zinc-100 disabled:opacity-30 disabled:cursor-not-allowed"
-                    >
-                      Back
-                    </button>
+                    >{t("Back")}</button>
                     <button
                       type="button"
                       onClick={handleNext}
@@ -986,9 +971,9 @@ export default function StoryPlayer({
                           !userInputValue.trim()) ||
                         (currentStep.type === "choice" && !selectedChoice)
                       }
-                      className="rounded-xl px-6 py-2 bg-[#5b217f] text-white hover:bg-[#7c2da3] disabled:opacity-50 disabled:cursor-not-allowed transition-all"
+                      className="rounded-xl px-6 py-2 bg-[#315e4a] text-white hover:bg-[#244a39] disabled:opacity-50 disabled:cursor-not-allowed transition-all"
                     >
-                      {isLastStep ? "Finish" : "Next"}
+                      {isLastStep ? t("Finish") : t("Next")}
                     </button>
                   </div>
                 </div>
@@ -1000,9 +985,7 @@ export default function StoryPlayer({
               <div className="lg:hidden mt-4 bg-white rounded-xl shadow-lg border border-zinc-200 p-4">
                 <div className="space-y-4">
                   <div className="flex items-center justify-between">
-                    <h3 className="text-sm font-semibold text-zinc-900">
-                      Audio Settings
-                    </h3>
+                    <h3 className="text-sm font-semibold text-zinc-900">{t("Audio Settings")}</h3>
                     <button
                       type="button"
                       onClick={() => setShowAudioControls(false)}
@@ -1025,9 +1008,7 @@ export default function StoryPlayer({
 
                   {/* Enable/Disable Audio */}
                   <div className="flex items-center justify-between">
-                    <label className="text-sm text-zinc-700">
-                      Enable Audio
-                    </label>
+                    <label className="text-sm text-zinc-700">{t("Enable Audio")}</label>
                     <button
                       type="button"
                       onClick={() => {
@@ -1048,9 +1029,7 @@ export default function StoryPlayer({
 
                   {/* Voice Selection */}
                   <div>
-                    <label className="block text-sm text-zinc-700 mb-2">
-                      Voice
-                    </label>
+                    <label className="block text-sm text-zinc-700 mb-2">{t("Voice")}</label>
                     <div className="flex gap-2">
                       <button
                         type="button"
@@ -1073,9 +1052,7 @@ export default function StoryPlayer({
                             ? "bg-blue-600 text-white"
                             : "bg-zinc-100 text-zinc-700 hover:bg-zinc-200"
                         }`}
-                      >
-                        Female
-                      </button>
+                      >{t("Female")}</button>
                       <button
                         type="button"
                         onClick={() => {
@@ -1097,17 +1074,13 @@ export default function StoryPlayer({
                             ? "bg-blue-600 text-white"
                             : "bg-zinc-100 text-zinc-700 hover:bg-zinc-200"
                         }`}
-                      >
-                        Male
-                      </button>
+                      >{t("Male")}</button>
                     </div>
                   </div>
 
                   {/* Speed Selection */}
                   <div>
-                    <label className="block text-sm text-zinc-700 mb-2">
-                      Speed
-                    </label>
+                    <label className="block text-sm text-zinc-700 mb-2">{t("Speed")}</label>
                     <div className="flex gap-2">
                       <button
                         type="button"
@@ -1130,9 +1103,7 @@ export default function StoryPlayer({
                             ? "bg-blue-600 text-white"
                             : "bg-zinc-100 text-zinc-700 hover:bg-zinc-200"
                         }`}
-                      >
-                        Slow
-                      </button>
+                      >{t("Slow")}</button>
                       <button
                         type="button"
                         onClick={() => {
@@ -1154,9 +1125,7 @@ export default function StoryPlayer({
                             ? "bg-blue-600 text-white"
                             : "bg-zinc-100 text-zinc-700 hover:bg-zinc-200"
                         }`}
-                      >
-                        Normal
-                      </button>
+                      >{t("Normal")}</button>
                       <button
                         type="button"
                         onClick={() => {
@@ -1178,9 +1147,7 @@ export default function StoryPlayer({
                             ? "bg-blue-600 text-white"
                             : "bg-zinc-100 text-zinc-700 hover:bg-zinc-200"
                         }`}
-                      >
-                        Fast
-                      </button>
+                      >{t("Fast")}</button>
                     </div>
                   </div>
 
@@ -1212,15 +1179,13 @@ export default function StoryPlayer({
                         }}
                         className="flex-1 px-3 py-2 bg-blue-50 hover:bg-blue-100 text-blue-700 rounded-lg text-sm font-medium transition-colors"
                       >
-                        {isPaused ? "Resume" : (isSpeaking ? "Pause" : "Play")}
+                        {isPaused ? t("Resume") : (isSpeaking ? t("Pause") : t("Play"))}
                       </button>
                       <button
                         type="button"
                         onClick={stopSpeaking}
                         className="px-3 py-2 bg-zinc-100 hover:bg-zinc-200 text-zinc-700 rounded-lg text-sm font-medium transition-colors"
-                      >
-                        Stop
-                      </button>
+                      >{t("Stop")}</button>
                     </div>
                   )}
                 </div>
@@ -1246,11 +1211,9 @@ export default function StoryPlayer({
                     d="M4 5a2 2 0 012-2 3 3 0 003 3h2a3 3 0 003-3 2 2 0 012 2v11a2 2 0 01-2 2H6a2 2 0 01-2-2V5zm3 4a1 1 0 000 2h.01a1 1 0 100-2H7zm3 0a1 1 0 000 2h3a1 1 0 100-2h-3zm-3 4a1 1 0 100 2h.01a1 1 0 100-2H7zm3 0a1 1 0 100 2h3a1 1 0 100-2h-3z"
                     clipRule="evenodd"
                   />
-                </svg>
-                Parent Guide
-              </span>
+                </svg>{t("Parent Guide")}</span>
               {!isValidParentGuide(currentStep?.parentGuide) && isValidParentGuide(cachedGuide) && !loadingGuide && (
-                <span className="text-purple-600 flex items-center gap-1" title="AI-generated guidance">
+                <span className="text-purple-600 flex items-center gap-1" title={t("AI-generated guidance")}>
                   <Sparkles className="w-3 h-3" />
                 </span>
               )}
@@ -1273,25 +1236,21 @@ export default function StoryPlayer({
 
             {loadingGuide ? (
               <div className="bg-white/50 rounded-xl p-4 border border-amber-200 flex items-center justify-center gap-2">
-                <div className="animate-pulse text-amber-600">Generating personalized guidance...</div>
+                <div className="animate-pulse text-amber-600">{t("Generating personalized guidance...")}</div>
               </div>
             ) : parentGuide.coActionPrompt ? (
               <div className="bg-white/50 rounded-xl p-4 border border-amber-200">
                 <div className="text-xs font-semibold text-blue-600 uppercase tracking-wide mb-2 flex items-center gap-1">
-                  <Sparkles className="w-3 h-3" />
-                  Co-Action Prompt
-                </div>
+                  <Sparkles className="w-3 h-3" />{t("Co-Action Prompt")}</div>
                 <p className="text-amber-900 text-sm italic leading-relaxed">
                   {parentGuide.coActionPrompt}
                 </p>
               </div>
             ) : guideError ? (
               <div className="bg-red-50 rounded-xl p-4 border border-red-200">
-                <div className="text-xs font-semibold text-red-600 uppercase tracking-wide mb-2">
-                  Error
-                </div>
+                <div className="text-xs font-semibold text-red-600 uppercase tracking-wide mb-2">{t("Error")}</div>
                 <p className="text-red-700 text-sm">
-                  {guideError}
+                  {t(guideError)}
                 </p>
               </div>
             ) : null}
@@ -1308,7 +1267,7 @@ export default function StoryPlayer({
                 }}
                 disabled={currentStepIndex === 0}
                 className="w-10 h-10 rounded-full flex items-center justify-center text-amber-800 hover:bg-amber-100 disabled:opacity-30 disabled:cursor-not-allowed transition-all"
-                aria-label="Previous step"
+                aria-label={t("Previous step")}
               >
                 <svg
                   xmlns="http://www.w3.org/2000/svg"
@@ -1337,7 +1296,7 @@ export default function StoryPlayer({
                   (currentStep?.type === "choice" && !selectedChoice)
                 }
                 className="w-10 h-10 rounded-full flex items-center justify-center bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-md"
-                aria-label={isLastStep ? "Finish" : "Next step"}
+                aria-label={isLastStep ? t("Finish") : t("Next step")}
               >
                 <svg
                   xmlns="http://www.w3.org/2000/svg"
@@ -1388,11 +1347,8 @@ export default function StoryPlayer({
               </div>
 
               {/* Congratulations Text */}
-              <h2 className="text-5xl font-bold text-white mb-4 animate-[fadeInUp_400ms_ease-out] drop-shadow-lg">
-                Congratulations!
-              </h2>
-              <p className="text-2xl text-white/90 mb-8 animate-[fadeInUp_500ms_ease-out] drop-shadow-md">
-                You completed <span className="font-bold">{title}</span>!
+              <h2 className="text-5xl font-bold text-white mb-4 animate-[fadeInUp_400ms_ease-out] drop-shadow-lg">{t("Congratulations!")}</h2>
+              <p className="text-2xl text-white/90 mb-8 animate-[fadeInUp_500ms_ease-out] drop-shadow-md">{t("You completed")}<span className="font-bold">{title}</span>!
               </p>
 
               {/* Collect Stars Button */}
@@ -1407,12 +1363,8 @@ export default function StoryPlayer({
                       ⭐
                     </span>
                     <div className="text-left">
-                      <div className="text-sm font-semibold text-purple-600 uppercase tracking-wide">
-                        Collect Your
-                      </div>
-                      <div className="text-2xl font-bold text-purple-700">
-                        3 Stars
-                      </div>
+                      <div className="text-sm font-semibold text-purple-600 uppercase tracking-wide">{t("Collect Your")}</div>
+                      <div className="text-2xl font-bold text-purple-700">{t("3 Stars")}</div>
                     </div>
                   </div>
                   <div className="absolute inset-0 rounded-2xl bg-gradient-to-r from-yellow-200/50 to-purple-200/50 opacity-0 group-hover:opacity-100 transition-opacity duration-200 -z-10"></div>
@@ -1420,9 +1372,7 @@ export default function StoryPlayer({
               ) : (
                 <div className="animate-[fadeInUp_200ms_ease-out]">
                   <div className="text-6xl mb-4">⭐</div>
-                  <p className="text-2xl font-bold text-white drop-shadow-lg">
-                    3 Stars Collected!
-                  </p>
+                  <p className="text-2xl font-bold text-white drop-shadow-lg">{t("3 Stars Collected!")}</p>
                 </div>
               )}
             </div>

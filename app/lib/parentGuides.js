@@ -1,13 +1,13 @@
-/* 保存绘本时生成父母引导，仅重试失败步骤。 */
+/* Generate parent guides when saving a storybook and retry only failed steps. */
 
-/** 校验引导的三个必需文本字段。 */
+/** Validate the three required guide text fields. */
 export function isValidParentGuide(guide) {
   return ["title", "description", "coActionPrompt"].every(
     (field) => typeof guide?.[field] === "string" && guide[field].trim()
   );
 }
 
-/** 比较影响引导的步骤内容，忽略图片、顺序和引导本身。 */
+/** Compare the step content that affects guides, ignoring images, order, and the guides themselves. */
 export function hasGuideContentChanged(step, initialStep) {
   const content = (item) => JSON.stringify([
     item.type,
@@ -18,7 +18,7 @@ export function hasGuideContentChanged(step, initialStep) {
   return !initialStep || content(step) !== content(initialStep);
 }
 
-/** 复用现有 Gemini 接口，确认保存部分结果或仅重试失败项。 */
+/** Reuse the existing Gemini endpoint and let users confirm a partial save or retry only failed steps. */
 export async function generateModuleGuides(moduleDefinition, initialSteps, childContext, { onProgress, onFailure } = {}) {
   const initialById = new Map(initialSteps.map((step) => [step.id, step]));
   const steps = moduleDefinition.steps.map((step) => {
@@ -31,7 +31,7 @@ export async function generateModuleGuides(moduleDefinition, initialSteps, child
   let pending = steps.map((step, index) => index).filter((index) => !steps[index].parentGuide);
 
   while (pending.length) {
-    // 每轮重试共享一分钟预算，避免步骤数放大保存等待时间。
+    // Each retry round shares a one-minute budget so more steps do not extend the save wait.
     const batchSignal = AbortSignal.timeout(60000);
     const failed = [];
     let completed = steps.length - pending.length;
@@ -54,7 +54,7 @@ export async function generateModuleGuides(moduleDefinition, initialSteps, child
         if (!response.ok) throw new Error(`Guide generation failed: ${response.status}`);
         const { guide } = await response.json();
         if (!isValidParentGuide(guide)) throw new Error("Invalid parent guide");
-        // 仅保存约定字段，避免模型输出额外数据。
+        // Save only fields defined in the schema and discard extra model output.
         step.parentGuide = {
           title: guide.title,
           description: guide.description,
@@ -68,7 +68,7 @@ export async function generateModuleGuides(moduleDefinition, initialSteps, child
       onProgress?.({ completed, total: steps.length });
     }
     if (!failed.length) break;
-    // 由页面展示明确操作；保留成功结果，只重试未生成的步骤。
+    // Let the page present the recovery options. Keep successful results and retry only steps with missing guides.
     const savePartial = await onFailure({
       failedSteps: failed.map((index) => index + 1),
       timedOut: batchSignal.aborted,
