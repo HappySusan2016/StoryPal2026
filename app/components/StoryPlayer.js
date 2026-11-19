@@ -5,8 +5,35 @@ import { useTranslation } from "../hooks/useTranslation";
 import Image from "next/image";
 import { flushSync } from "react-dom";
 import { printStoryPages } from "./printStoryPages";
-import { Printer, Sparkles } from "lucide-react";
+import { ArrowLeft, ArrowRight, BookOpen, Printer, Sparkles, Star, Volume2 } from "lucide-react";
 import { isValidParentGuide } from "../lib/parentGuides";
+
+/** @module Replace storybook profile variables with the current child's details */
+export function interpolateStoryText(text, context) {
+  if (typeof text !== "string") return text;
+  const replaceVariable = (_, path) =>
+    String(path.trim().split(".").reduce((value, key) => value?.[key], context) ?? "");
+  return text.replace(/@([a-zA-Z0-9_.]+)/g, replaceVariable)
+    .replace(/\{\{\s*([^}]+)\s*\}\}/g, replaceVariable);
+}
+
+/** @module Cycle through normal, large, and extra-large reading text sizes */
+const READER_TEXT_SIZES = [
+  { label: "Normal", scale: 1 },
+  { label: "Large", scale: 1.25 },
+  { label: "Extra large", scale: 1.5 },
+];
+const READER_TEXT_KEY = "storypal.readerTextSize";
+
+function loadReaderTextSize() {
+  if (typeof window === "undefined") return 0;
+  try {
+    const index = Number(localStorage.getItem(READER_TEXT_KEY));
+    return READER_TEXT_SIZES[index] ? index : 0;
+  } catch {
+    return 0;
+  }
+}
 
 /**
  * A reusable player that renders a sequence of story steps.
@@ -25,8 +52,19 @@ export default function StoryPlayer({
   childId = null,
   onStarsCollected,
   onPageConfirmed,
+  layout = "modal",
+  readerHeading,
+  childMode = false,
+  onReadAgain,
 }) {
   const { t } = useTranslation();
+  /** @module Layouts for reading, editor preview, and the dialog */
+  const isPreview = layout === "preview";
+  const isReader = layout === "reader";
+  const isModal = layout === "modal";
+  const showParentGuide = !isPreview && !childMode;
+  const [readerTextIndex, setReaderTextIndex] = useState(() => isReader ? loadReaderTextSize() : 0);
+  const readerTextSize = READER_TEXT_SIZES[readerTextIndex];
   const title = moduleDefinition?.title || "Story";
   const coverImage = moduleDefinition?.coverImage || "";
   const moduleId = moduleDefinition?.id || "";
@@ -55,20 +93,39 @@ export default function StoryPlayer({
     return result;
   }, [fontPreset]);
 
-  const [currentStepIndex, setCurrentStepIndex] = useState(0);
+  const [stepIndex, setCurrentStepIndex] = useState(0);
+  // After a draft step is deleted, keep the preview on the nearest remaining page.
+  const currentStepIndex = isPreview ? Math.min(stepIndex, Math.max(0, steps.length - 1)) : stepIndex;
   const [userInputValue, setUserInputValue] = useState("");
   const [selectedChoice, setSelectedChoice] = useState(null);
   const [showCelebration, setShowCelebration] = useState(false);
+  /** @module Star collection and navigation after completion */
   const [starsCollected, setStarsCollected] = useState(false);
+  const [collectingStars, setCollectingStars] = useState(false);
+  const [rewardError, setRewardError] = useState(false);
+  const rewardTimerRef = useRef(null);
+  const collectingStarsRef = useRef(false);
+  const playerMountedRef = useRef(true);
+  useEffect(() => {
+    playerMountedRef.current = true;
+    return () => {
+      playerMountedRef.current = false;
+      clearTimeout(rewardTimerRef.current);
+    };
+  }, []);
 
   // Audio settings state
   const [audioEnabled, setAudioEnabled] = useState(narrate);
   const [voiceType, setVoiceType] = useState(preferredVoice);
   const [speed, setSpeed] = useState("normal"); // "slow", "normal", "fast"
   const [showAudioControls, setShowAudioControls] = useState(false);
+  const readerAudioButtonRef = useRef(null);
 
   const currentStep = steps[currentStepIndex];
   const isLastStep = currentStepIndex === steps.length - 1;
+  const needsResponse =
+    (currentStep?.type === "user-input" && !userInputValue.trim()) ||
+    (currentStep?.type === "choice" && !selectedChoice);
 
   // --- Speech synthesis (optional narration) ---
   const voicesRef = useRef([]);
@@ -104,7 +161,7 @@ export default function StoryPlayer({
         /man\s/i,
         /\(male\)/i,
       ];
-      
+
       for (const h of maleHeuristics) {
         const v = list.find((voice) => h.test(voice.name));
         if (v) {
@@ -112,13 +169,13 @@ export default function StoryPlayer({
           return v;
         }
       }
-      
+
       // Fallback: try to find voices that DON'T match female patterns
       const notFemaleVoices = list.filter(voice => {
         const name = voice.name.toLowerCase();
         return !/(female|woman|girl|zira|jenny|aria|samantha|victoria|karen|allison|zoe|michelle|lisa|susan|hazel|emily|sarah|anna|maria)/i.test(name);
       });
-      
+
       if (notFemaleVoices.length > 0) {
         console.log("Selected male voice (by exclusion):", notFemaleVoices[0].name);
         return notFemaleVoices[0];
@@ -133,7 +190,7 @@ export default function StoryPlayer({
         /woman\s/i,
         /\(female\)/i,
       ];
-      
+
       for (const h of femaleHeuristics) {
         const v = list.find((voice) => h.test(voice.name));
         if (v) {
@@ -142,7 +199,7 @@ export default function StoryPlayer({
         }
       }
     }
-    
+
     console.log("Using default voice:", list[0].name);
     return list[0];
   }
@@ -152,23 +209,10 @@ export default function StoryPlayer({
     if (!text || !audioEnabled) return;
     // cancel previous utterance
     window.speechSynthesis.cancel();
-    
-    // Ensure voices are loaded
-    if (!voicesRef.current || voicesRef.current.length === 0) {
-      loadVoices();
-      // If still no voices after loading, wait a bit and retry once
-      if (!voicesRef.current || voicesRef.current.length === 0) {
-        console.warn("Voices not loaded yet, retrying in 100ms");
-        setTimeout(() => {
-          loadVoices();
-          if (audioEnabled) {
-            speak(text);
-          }
-        }, 100);
-        return;
-      }
-    }
-    
+
+    // Use the browser's default voice while its voice list loads.
+    if (!voicesRef.current.length) loadVoices();
+
     const utter = new SpeechSynthesisUtterance(text);
     const voice = pickPreferredVoice();
     if (voice) {
@@ -190,20 +234,20 @@ export default function StoryPlayer({
     setIsSpeaking(true);
     setIsPaused(false);
     currentUtteranceRef.current = utter;
-    
+
     utter.onstart = () => {
       console.log("Speech started");
       setIsSpeaking(true);
       setIsPaused(false);
     };
-    
+
     utter.onend = () => {
       console.log("Speech ended");
       setIsSpeaking(false);
       setIsPaused(false);
       currentUtteranceRef.current = null;
     };
-    
+
     utter.onerror = (event) => {
       // "interrupted" error is expected when switching voices or stopping speech
       if (event.error === "interrupted") {
@@ -215,7 +259,7 @@ export default function StoryPlayer({
       setIsPaused(false);
       currentUtteranceRef.current = null;
     };
-    
+
     window.speechSynthesis.speak(utter);
   }
 
@@ -247,7 +291,7 @@ export default function StoryPlayer({
     loadVoices();
     if (typeof window !== "undefined" && window.speechSynthesis) {
       window.speechSynthesis.onvoiceschanged = loadVoices;
-      
+
       // Force load voices after a short delay (some browsers need this)
       setTimeout(() => {
         loadVoices();
@@ -262,8 +306,8 @@ export default function StoryPlayer({
   }, []);
 
   useEffect(() => {
-    if (!audioEnabled || !currentStep) return;
-    
+    if (!audioEnabled || !currentStep || showCelebration) return;
+
     // Small delay to ensure voices are loaded before speaking
     const speakTimeout = setTimeout(() => {
       const type = currentStep.type;
@@ -273,10 +317,10 @@ export default function StoryPlayer({
         speak(interpolate(currentStep.message || ""));
       }
     }, 200);
-    
+
     return () => clearTimeout(speakTimeout);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [audioEnabled, currentStepIndex, voiceType, speed]);
+  }, [audioEnabled, currentStepIndex, voiceType, speed, showCelebration]);
 
   // Stop speaking when audio is disabled
   useEffect(() => {
@@ -285,29 +329,8 @@ export default function StoryPlayer({
     }
   }, [audioEnabled]);
 
-  function getByPath(obj, path) {
-    if (!obj || !path) return "";
-    return (
-      path.split(".").reduce((acc, key) => {
-        if (acc == null) return "";
-        return acc[key];
-      }, obj) ?? ""
-    );
-  }
-
   function interpolate(text) {
-    if (typeof text !== "string") return text;
-    // First handle @ syntax (e.g., @child.name)
-    let result = text.replace(/@([a-zA-Z0-9_.]+)/g, (_, expr) => {
-      const value = getByPath(templateContext, expr.trim());
-      return value == null ? "" : String(value);
-    });
-    // Then handle {{}} syntax for backward compatibility (e.g., {{child.name}})
-    result = result.replace(/\{\{\s*([^}]+)\s*\}\}/g, (_, expr) => {
-      const value = getByPath(templateContext, expr.trim());
-      return value == null ? "" : String(value);
-    });
-    return result;
+    return interpolateStoryText(text, templateContext);
   }
 
   function resetTransientState() {
@@ -325,9 +348,7 @@ export default function StoryPlayer({
 
   /** @module Confirm the current reading page and advance the story */
   function handleNext() {
-    if (!currentStep || showCelebration) return;
-    if (currentStep?.type === "user-input" && !userInputValue.trim()) return;
-    if (currentStep?.type === "choice" && !selectedChoice) return;
+    if (!currentStep || showCelebration || needsResponse) return;
 
     onPageConfirmed?.(currentStepIndex, isLastStep);
     if (!isLastStep) {
@@ -337,31 +358,71 @@ export default function StoryPlayer({
     } else {
       // Show celebration screen on last step completion
       resetTransientState();
+      if (isReader) stopSpeaking();
       setShowCelebration(true);
     }
   }
 
-  function handleCollectStars() {
-    const stars = 3; // Award 3 stars per completed module
-    setStarsCollected(true);
+  /** @module Page navigation and rereading on the standalone reading page */
+  function handlePreviousPage() {
+    setCurrentStepIndex(currentStepIndex - 1);
+    resetTransientState();
+  }
 
-    // Call the parent callback to save stars
-    if (onStarsCollected && childId && moduleId) {
-      onStarsCollected(childId, moduleId, stars);
+  function handlePreviewNextPage() {
+    setCurrentStepIndex(currentStepIndex + 1);
+    resetTransientState();
+  }
+
+  function handleReadAgain() {
+    onReadAgain?.();
+    setShowAudioControls(false);
+    setRewardError(false);
+    setCurrentStepIndex(0);
+    resetTransientState();
+    setShowCelebration(false);
+  }
+
+  /** @module Reading tools and child rewards */
+  function handleChangeReaderTextSize() {
+    const nextIndex = (readerTextIndex + 1) % READER_TEXT_SIZES.length;
+    setReaderTextIndex(nextIndex);
+    try {
+      localStorage.setItem(READER_TEXT_KEY, String(nextIndex));
+    } catch {
+      // If storage is unavailable, text size can still be adjusted for this reading session.
     }
+  }
 
-    // Close after a short delay
-    setTimeout(() => {
-      onFinished?.();
-      onClose?.();
-    }, 1500);
+  async function handleCollectStars() {
+    if (collectingStarsRef.current || rewardTimerRef.current !== null) return;
+    collectingStarsRef.current = true;
+    setCollectingStars(true);
+    setRewardError(false);
+    try {
+      if (onStarsCollected && childId && moduleId) {
+        await onStarsCollected(childId, moduleId, 3);
+      }
+      if (!playerMountedRef.current) return;
+      setStarsCollected(true);
+      rewardTimerRef.current = setTimeout(() => {
+        onFinished?.();
+        onClose?.();
+      }, 1500);
+    } catch (error) {
+      console.error("Failed to save stars", error);
+      if (playerMountedRef.current) setRewardError(true);
+    } finally {
+      collectingStarsRef.current = false;
+      if (playerMountedRef.current) setCollectingStars(false);
+    }
   }
 
   /** @module Parent guide generation and fallback */
   const [aiGuides, setAiGuides] = useState({});
   const [guideRequest, setGuideRequest] = useState(null);
   // Key the cache on the full content and child context so guides are not reused across stories or children.
-  const guideRequestBody = JSON.stringify({
+  const guideRequestBody = !showParentGuide ? "" : JSON.stringify({
     stepType: currentStep?.type,
     stepMessage: currentStep?.message || "",
     storyTitle: title,
@@ -373,7 +434,7 @@ export default function StoryPlayer({
   const guideError = guideRequest?.key === stepKey ? guideRequest.error : null;
 
   useEffect(() => {
-    if (!currentStep || isValidParentGuide(currentStep.parentGuide)) return;
+    if (!showParentGuide || !currentStep || isValidParentGuide(currentStep.parentGuide)) return;
     if (process.env.NEXT_PUBLIC_DISABLE_AI_COACTION === "true") return;
     if (isValidParentGuide(cachedGuide)) return;
 
@@ -417,11 +478,11 @@ export default function StoryPlayer({
       active = false;
       controller.abort();
     };
-  }, [currentStep, cachedGuide, stepKey, guideRequestBody]);
+  }, [showParentGuide, currentStep, cachedGuide, stepKey, guideRequestBody]);
 
   // Get parent guide content (AI-generated or fallback)
   const parentGuide = useMemo(() => {
-    if (!currentStep) return null;
+    if (!showParentGuide || !currentStep) return null;
 
     // Check if step has custom parent guide
     if (isValidParentGuide(currentStep.parentGuide)) {
@@ -469,13 +530,17 @@ export default function StoryPlayer({
       };
     }
     return null;
-  }, [currentStep, cachedGuide, loadingGuide]);
+  }, [showParentGuide, currentStep, cachedGuide, loadingGuide]);
 
   /** @module Storybook content display */
   function renderStoryContent(step, isPrintPage = false) {
     return (
       <>
-          {coverImage ? (
+          {coverImage && !isModal && !isPrintPage ? (
+            <div className="story-preview-image">
+              <Image src={coverImage} alt={title} width={1500} height={1000} unoptimized />
+            </div>
+          ) : coverImage ? (
             <div className="story-print-cover relative w-full aspect-4/3 overflow-hidden">
               <Image
                 src={coverImage}
@@ -485,6 +550,10 @@ export default function StoryPlayer({
                 unoptimized
                 sizes="90vw"
               />
+            </div>
+          ) : !isModal && !isPrintPage ? (
+            <div className="story-preview-cover grid place-items-center" aria-hidden="true">
+              <BookOpen size={48} strokeWidth={1.5} />
             </div>
           ) : moduleId === "parent-training" ? (
             <div className="story-print-cover relative w-full aspect-4/3 overflow-hidden bg-gradient-to-br from-purple-100 via-pink-50 to-blue-50 flex items-center justify-center">
@@ -502,12 +571,11 @@ export default function StoryPlayer({
             </div>
           ) : null}
           <div className="story-print-copy p-6 flex-1 flex flex-col" style={fontStyle}>
-            <h3
-              className="text-2xl font-semibold text-zinc-900 mb-4"
-              style={fontStyle}
-            >
-              {interpolate(title)}
-            </h3>
+            {(!isReader || isPrintPage) && (
+              <h3 className="text-2xl font-semibold text-zinc-900 mb-4" style={fontStyle}>
+                {interpolate(title)}
+              </h3>
+            )}
 
             {step && (
               <div className="story-print-step flex-1 space-y-4">
@@ -544,6 +612,7 @@ export default function StoryPlayer({
                     </div>
                     <input
                       type="text"
+                      aria-label={t("Child's input")}
                       value={isPrintPage && step !== currentStep ? "" : userInputValue}
                       onChange={(e) => setUserInputValue(e.target.value)}
                       placeholder={interpolate(
@@ -552,11 +621,11 @@ export default function StoryPlayer({
                       className="w-full bg-white/90 border-2 border-zinc-200 rounded-xl px-4 py-3 text-zinc-900 placeholder-zinc-400 focus:outline-none focus:ring-2 focus:ring-blue-300 focus:border-blue-300 transition-all"
                       style={fontStyle}
                       onKeyDown={(e) => {
-                        if (e.key === "Enter" && userInputValue.trim()) {
+                        if (!isPreview && e.key === "Enter" && userInputValue.trim()) {
                           handleNext();
                         }
                       }}
-                      autoFocus={!isPrintPage}
+                      autoFocus={isModal && !isPrintPage}
                     />
                   </div>
                 )}
@@ -629,574 +698,416 @@ export default function StoryPlayer({
   }
 
   // Handle empty storybooks after calling all hooks to keep hook order stable.
-  if (!Array.isArray(steps) || steps.length === 0) return null;
+  if (!Array.isArray(steps) || (isModal && steps.length === 0)) return null;
 
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-      <div
-        className="absolute inset-0 bg-black/40 backdrop-blur-sm"
-        onClick={handleClose}
-      />
-      <div className="relative z-10 w-full max-w-6xl max-h-[90vh] min-h-[600px] rounded-2xl bg-white shadow-lg animate-[fadeInUp_200ms_ease-out] flex flex-col lg:flex-row overflow-hidden story-player-content">
-        {/* Main Story Content */}
-        <div className="flex-1 flex flex-col overflow-y-auto relative">
-          {/* Place the print button to the left of audio settings and omit all controls from print output. */}
+  /** @module Storybook content, parent guidance, and completion state */
+  const playerClassName = isReader
+    ? `story-reader-layout story-player-content${childMode ? " story-reader-child" : ""}`
+    : `relative w-full rounded-2xl bg-white shadow-lg flex flex-col lg:flex-row overflow-hidden story-player-content ${isPreview ? "story-preview-stage" : "z-10 max-w-6xl max-h-[90vh] min-h-[600px] animate-[fadeInUp_200ms_ease-out]"}`;
+
+  const printPages = isPrinting && (
+    <div aria-hidden="true" style={{ position: "fixed", left: "-100000px", top: 0, width: 640, pointerEvents: "none" }}>
+      <div ref={printPagesRef}>
+        {steps.map((step, index) => (
+          <section className="story-print-page" key={index}>
+            <div className="story-print-content bg-white">{renderStoryContent(step, true)}</div>
+          </section>
+        ))}
+      </div>
+    </div>
+  );
+
+  /** @module Shared audio panel for the reading page, editor preview, and legacy player */
+  function handleCloseAudioControls() {
+    setShowAudioControls(false);
+    if (isReader) readerAudioButtonRef.current?.focus();
+  }
+
+  const audioControls = showAudioControls && (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <h3 className="text-sm font-semibold text-zinc-900">{t("Audio Settings")}</h3>
+        <button
+          type="button"
+          onClick={handleCloseAudioControls}
+          aria-label={t("Close")}
+          className="text-zinc-400 hover:text-zinc-600"
+        >
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            className="w-4 h-4"
+            viewBox="0 0 20 20"
+            fill="currentColor"
+          >
+            <path
+              fillRule="evenodd"
+              d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z"
+              clipRule="evenodd"
+            />
+          </svg>
+        </button>
+      </div>
+
+      {/* Enable/Disable Audio */}
+      <div className="flex items-center justify-between">
+        <label className="text-sm text-zinc-700">{t("Enable Audio")}</label>
+        <button
+          type="button"
+          role="switch"
+          aria-label={t("Enable Audio")}
+          aria-checked={audioEnabled}
+          onClick={() => {
+            setAudioEnabled(!audioEnabled);
+            if (audioEnabled) stopSpeaking();
+          }}
+          className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
+            audioEnabled ? "bg-blue-600" : "bg-zinc-300"
+          }`}
+        >
+          <span
+            className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+              audioEnabled ? "translate-x-6" : "translate-x-1"
+            }`}
+          />
+        </button>
+      </div>
+
+      {/* The read-aloud effect replays the current page with the updated voice or speed. */}
+      <div role="group" aria-label={t("Voice")}>
+        <p className="mb-2 text-sm text-zinc-700">{t("Voice")}</p>
+        <div className="flex flex-wrap gap-2">
+          {[["female", "Female"], ["male", "Male"]].map(([value, label]) => (
+            <button
+              key={value}
+              type="button"
+              aria-pressed={voiceType === value}
+              onClick={() => setVoiceType(value)}
+              className="flex-1 rounded-lg bg-zinc-100 px-3 py-2 text-sm font-medium text-zinc-700 hover:bg-zinc-200 aria-pressed:bg-blue-600 aria-pressed:text-white"
+            >{t(label)}</button>
+          ))}
+        </div>
+      </div>
+
+      <div role="group" aria-label={t("Speed")}>
+        <p className="mb-2 text-sm text-zinc-700">{t("Speed")}</p>
+        <div className="flex flex-wrap gap-2">
+          {[["slow", "Slow"], ["normal", "Normal"], ["fast", "Fast"]].map(([value, label]) => (
+            <button
+              key={value}
+              type="button"
+              aria-pressed={speed === value}
+              onClick={() => setSpeed(value)}
+              className="flex-1 rounded-lg bg-zinc-100 px-3 py-2 text-sm font-medium text-zinc-700 hover:bg-zinc-200 aria-pressed:bg-blue-600 aria-pressed:text-white"
+            >{t(label)}</button>
+          ))}
+        </div>
+      </div>
+
+      {/* Playback Controls */}
+      {audioEnabled && (
+        <div className="flex items-center gap-2 pt-2 border-t border-zinc-200">
           <button
             type="button"
-            onClick={handlePrint}
-            disabled={isPrinting || !steps.length}
-            className="hidden lg:flex absolute top-4 right-28 z-10 w-10 h-10 rounded-full bg-white/80 hover:bg-white shadow-md items-center justify-center text-zinc-700 disabled:opacity-50"
-            aria-label={t("Print")}
-            title={t("Print")}
+            onClick={() => {
+              if (isPaused) {
+                // If paused, resume
+                resumeSpeaking();
+              } else if (isSpeaking) {
+                // If speaking, pause
+                pauseSpeaking();
+              } else {
+                // If not speaking, start speaking
+                if (currentStep) {
+                  const type = currentStep.type;
+                  if (
+                    type === "doctor" ||
+                    type === "user-input" ||
+                    type === "choice"
+                  ) {
+                    speak(interpolate(currentStep.message || ""));
+                  }
+                }
+              }
+            }}
+            className="flex-1 px-3 py-2 bg-blue-50 hover:bg-blue-100 text-blue-700 rounded-lg text-sm font-medium transition-colors"
           >
-            <Printer className="w-5 h-5" />
+            {isPaused ? t("Resume") : (isSpeaking ? t("Pause") : t("Play"))}
           </button>
-          {printError && <p role="alert" className="p-4 text-red-700">{printError}</p>}
-          {isPrinting && (
-            <div aria-hidden="true" style={{ position: "fixed", left: "-100000px", top: 0, width: 640, pointerEvents: "none" }}>
-              <div ref={printPagesRef}>
-                {steps.map((step, index) => (
-                  <section className="story-print-page" key={index}>
-                    <div className="story-print-content bg-white">{renderStoryContent(step, true)}</div>
-                  </section>
-                ))}
-              </div>
+          <button
+            type="button"
+            onClick={stopSpeaking}
+            className="px-3 py-2 bg-zinc-100 hover:bg-zinc-200 text-zinc-700 rounded-lg text-sm font-medium transition-colors"
+          >{t("Stop")}</button>
+        </div>
+      )}
+    </div>
+  );
+
+  const readerHeader = isReader && (
+    <header
+      className="story-reader-header"
+      onKeyDown={(event) => {
+        if (event.key === "Escape" && showAudioControls) handleCloseAudioControls();
+      }}
+    >
+      {readerHeading}
+      <div className="story-reader-tools">
+        <button type="button" className="tool-btn" ref={readerAudioButtonRef}
+          aria-expanded={showAudioControls && !showCelebration}
+          aria-controls={showAudioControls && !showCelebration ? "reader-audio-controls" : undefined}
+          onClick={() => setShowAudioControls((open) => !open)}
+          disabled={!currentStep || showCelebration || (typeof window !== "undefined" && !window.speechSynthesis)}>
+          <Volume2 className="size-[13px]" aria-hidden="true" />{t("Read aloud")}
+        </button>
+        <button type="button" className="tool-btn" onClick={handleChangeReaderTextSize}
+          aria-label={`${t("Text size")}: ${t(readerTextSize.label)}`}>
+          <span aria-hidden="true">Aa</span>{t("Text size")}
+        </button>
+        <button type="button" className="tool-btn" onClick={handlePrint} disabled={isPrinting || !steps.length}>
+          <Printer className="size-[13px]" aria-hidden="true" />{t("Print")}
+        </button>
+      </div>
+      {!showCelebration && audioControls && (
+        <section id="reader-audio-controls" aria-label={t("Audio Settings")} className="story-reader-audio-panel">
+          {audioControls}
+        </section>
+      )}
+    </header>
+  );
+
+  if (isReader && showCelebration) {
+    return (
+      <>
+        {readerHeader}
+        {printPages}
+        {printError && <p role="alert" className="p-4 text-red-700">{t(printError)}</p>}
+        <section className="story-preview-stage story-reader-completion" aria-labelledby="story-complete-heading">
+          {childMode && (
+            <div className={`story-reward-stars${starsCollected ? " is-collected" : ""}`} aria-hidden="true">
+              {[0, 1, 2].map((index) => <Star key={index} style={{ "--star-order": index }} />)}
             </div>
           )}
-          {/* Close button for desktop */}
-          <button
-            type="button"
-            onClick={handleClose}
-            className="hidden lg:flex absolute top-4 right-4 z-10 w-10 h-10 rounded-full bg-white/80 backdrop-blur-sm hover:bg-white shadow-md items-center justify-center text-zinc-700 hover:text-zinc-900 transition-all"
-            aria-label={t("Close")}
-          >
-            <svg
-              xmlns="http://www.w3.org/2000/svg"
-              className="w-5 h-5"
-              viewBox="0 0 20 20"
-              fill="currentColor"
-            >
-              <path
-                fillRule="evenodd"
-                d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z"
-                clipRule="evenodd"
-              />
-            </svg>
-          </button>
+          <h2 id="story-complete-heading" className="text-2xl font-semibold" tabIndex={-1} ref={(heading) => { heading?.focus(); }}>
+            {t("Congratulations!")}
+          </h2>
+          {rewardError && <p role="alert" className="mt-3 text-red-700">{t("Could not save changes. Please try again.")}</p>}
+          {childMode && (starsCollected ? (
+            <p role="status" className="mt-4 text-lg font-semibold text-[#315e4a]">{t("3 Stars Collected!")}</p>
+          ) : (
+            <button type="button" className="story-editor-button is-primary mt-4" onClick={handleCollectStars}
+              disabled={collectingStars} aria-busy={collectingStars}>
+              {collectingStars ? t("Loading…") : `${t("Collect Your")} ${t("3 Stars")}`}
+            </button>
+          ))}
+          {(!childMode || (!starsCollected && !collectingStars)) && (
+            <div className="mt-4 flex flex-wrap justify-center gap-3">
+              <button type="button" className="story-editor-button" onClick={handleReadAgain}>{t("Read again")}</button>
+              <button type="button" className="story-editor-button" onClick={onFinished}>{t("All done")}</button>
+            </div>
+          )}
+        </section>
+      </>
+    );
+  }
 
-          {/* Audio Controls Button */}
-          <button
-            type="button"
-            onClick={() => setShowAudioControls(!showAudioControls)}
-            className="hidden lg:flex absolute top-4 right-16 z-10 w-10 h-10 rounded-full bg-white/80 backdrop-blur-sm hover:bg-white shadow-md items-center justify-center text-zinc-700 hover:text-zinc-900 transition-all"
-            aria-label={t("Audio Settings")}
-          >
-            <svg
-              xmlns="http://www.w3.org/2000/svg"
-              className="w-5 h-5"
-              viewBox="0 0 20 20"
-              fill="currentColor"
+  return (
+    <div className={isModal ? "fixed inset-0 z-50 flex items-center justify-center p-4" : undefined}>
+      {isModal && (
+        <div
+          className="absolute inset-0 bg-black/40 backdrop-blur-sm"
+          onClick={handleClose}
+        />
+      )}
+      {readerHeader}
+      {printPages}
+      <div className={playerClassName} style={isReader ? { "--reader-scale": readerTextSize.scale } : undefined}>
+        <div className={`relative flex min-w-0 flex-1 flex-col ${isReader ? "story-preview-stage overflow-hidden" : "overflow-y-auto"}`}>
+          {/* Keep the print control in its original position in the dialog and editor preview. */}
+          {!isReader && (
+            <button
+              type="button"
+              onClick={handlePrint}
+              disabled={isPrinting || !steps.length}
+              className="story-player-print hidden lg:flex absolute top-4 right-28 z-10 w-10 h-10 rounded-full bg-white/80 hover:bg-white shadow-md items-center justify-center text-zinc-700 disabled:opacity-50"
+              aria-label={t("Print")}
+              title={t("Print")}
             >
-              <path
-                fillRule="evenodd"
-                d="M9.383 3.076A1 1 0 0110 4v12a1 1 0 01-1.617.793L4.383 13H2a1 1 0 01-1-1V8a1 1 0 011-1h2.383l4.617-3.793a1 1 0 01.383-.131zM14.657 2.929a1 1 0 011.414 0A9.972 9.972 0 0119 10a9.972 9.972 0 01-2.929 7.071 1 1 0 01-1.414-1.414A7.971 7.971 0 0017 10c0-2.21-.894-4.208-2.343-5.657a1 1 0 010-1.414zm-2.829 2.828a1 1 0 011.415 0A5.983 5.983 0 0115 10a5.984 5.984 0 01-1.757 4.243 1 1 0 01-1.415-1.415A3.984 3.984 0 0013 10a3.983 3.983 0 00-1.172-2.828 1 1 0 010-1.415z"
-                clipRule="evenodd"
-              />
-            </svg>
-          </button>
+              <Printer className="w-5 h-5" />
+            </button>
+          )}
+          {printError && <p role="alert" className="p-4 text-red-700">{printError}</p>}
+          {/* Close button for the desktop reading dialog */}
+          {isModal && (
+            <button
+              type="button"
+              onClick={handleClose}
+              className="hidden lg:flex absolute top-4 right-4 z-10 w-10 h-10 rounded-full bg-white/80 backdrop-blur-sm hover:bg-white shadow-md items-center justify-center text-zinc-700 hover:text-zinc-900 transition-all"
+              aria-label={t("Close")}
+            >
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                className="w-5 h-5"
+                viewBox="0 0 20 20"
+                fill="currentColor"
+              >
+                <path
+                  fillRule="evenodd"
+                  d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z"
+                  clipRule="evenodd"
+                />
+              </svg>
+            </button>
+          )}
 
-          {/* Audio Controls Panel */}
-          {showAudioControls && (
+          {/* Keep separate audio settings for the editor preview and legacy player. */}
+          {!isReader && (
+            <button
+              type="button"
+              onClick={() => setShowAudioControls(!showAudioControls)}
+              className="hidden lg:flex absolute top-4 right-16 z-10 w-10 h-10 rounded-full bg-white/80 backdrop-blur-sm hover:bg-white shadow-md items-center justify-center text-zinc-700 hover:text-zinc-900 transition-all"
+              aria-label={t("Audio Settings")}
+            >
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                className="w-5 h-5"
+                viewBox="0 0 20 20"
+                fill="currentColor"
+              >
+                <path
+                  fillRule="evenodd"
+                  d="M9.383 3.076A1 1 0 0110 4v12a1 1 0 01-1.617.793L4.383 13H2a1 1 0 01-1-1V8a1 1 0 011-1h2.383l4.617-3.793a1 1 0 01.383-.131zM14.657 2.929a1 1 0 011.414 0A9.972 9.972 0 0119 10a9.972 9.972 0 01-2.929 7.071 1 1 0 01-1.414-1.414A7.971 7.971 0 0017 10c0-2.21-.894-4.208-2.343-5.657a1 1 0 010-1.414zm-2.829 2.828a1 1 0 011.415 0A5.983 5.983 0 0115 10a5.984 5.984 0 01-1.757 4.243 1 1 0 01-1.415-1.415A3.984 3.984 0 0013 10a3.983 3.983 0 00-1.172-2.828 1 1 0 010-1.415z"
+                  clipRule="evenodd"
+                />
+              </svg>
+            </button>
+          )}
+
+          {!isReader && audioControls && (
             <div className="hidden lg:block absolute top-16 right-4 z-20 w-64 bg-white rounded-xl shadow-lg border border-zinc-200 p-4">
-              <div className="space-y-4">
-                <div className="flex items-center justify-between">
-                  <h3 className="text-sm font-semibold text-zinc-900">{t("Audio Settings")}</h3>
-                  <button
-                    type="button"
-                    onClick={() => setShowAudioControls(false)}
-                    className="text-zinc-400 hover:text-zinc-600"
-                  >
-                    <svg
-                      xmlns="http://www.w3.org/2000/svg"
-                      className="w-4 h-4"
-                      viewBox="0 0 20 20"
-                      fill="currentColor"
-                    >
-                      <path
-                        fillRule="evenodd"
-                        d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z"
-                        clipRule="evenodd"
-                      />
-                    </svg>
-                  </button>
-                </div>
-
-                {/* Enable/Disable Audio */}
-                <div className="flex items-center justify-between">
-                  <label className="text-sm text-zinc-700">{t("Enable Audio")}</label>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setAudioEnabled(!audioEnabled);
-                      if (audioEnabled) stopSpeaking();
-                    }}
-                    className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
-                      audioEnabled ? "bg-blue-600" : "bg-zinc-300"
-                    }`}
-                  >
-                    <span
-                      className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
-                        audioEnabled ? "translate-x-6" : "translate-x-1"
-                      }`}
-                    />
-                  </button>
-                </div>
-
-                {/* Voice Selection */}
-                <div>
-                  <label className="block text-sm text-zinc-700 mb-2">{t("Voice")}</label>
-                  <div className="flex gap-2">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setVoiceType("female");
-                        stopSpeaking();
-                        if (audioEnabled && currentStep) {
-                          const type = currentStep.type;
-                          if (
-                            type === "doctor" ||
-                            type === "user-input" ||
-                            type === "choice"
-                          ) {
-                            speak(interpolate(currentStep.message || ""));
-                          }
-                        }
-                      }}
-                      className={`flex-1 px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
-                        voiceType === "female"
-                          ? "bg-blue-600 text-white"
-                          : "bg-zinc-100 text-zinc-700 hover:bg-zinc-200"
-                      }`}
-                    >{t("Female")}</button>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setVoiceType("male");
-                        stopSpeaking();
-                        if (audioEnabled && currentStep) {
-                          const type = currentStep.type;
-                          if (
-                            type === "doctor" ||
-                            type === "user-input" ||
-                            type === "choice"
-                          ) {
-                            speak(interpolate(currentStep.message || ""));
-                          }
-                        }
-                      }}
-                      className={`flex-1 px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
-                        voiceType === "male"
-                          ? "bg-blue-600 text-white"
-                          : "bg-zinc-100 text-zinc-700 hover:bg-zinc-200"
-                      }`}
-                    >{t("Male")}</button>
-                  </div>
-                </div>
-
-                {/* Speed Selection */}
-                <div>
-                  <label className="block text-sm text-zinc-700 mb-2">{t("Speed")}</label>
-                  <div className="flex gap-2">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setSpeed("slow");
-                        stopSpeaking();
-                        if (audioEnabled && currentStep) {
-                          const type = currentStep.type;
-                          if (
-                            type === "doctor" ||
-                            type === "user-input" ||
-                            type === "choice"
-                          ) {
-                            speak(interpolate(currentStep.message || ""));
-                          }
-                        }
-                      }}
-                      className={`flex-1 px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
-                        speed === "slow"
-                          ? "bg-blue-600 text-white"
-                          : "bg-zinc-100 text-zinc-700 hover:bg-zinc-200"
-                      }`}
-                    >{t("Slow")}</button>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setSpeed("normal");
-                        stopSpeaking();
-                        if (audioEnabled && currentStep) {
-                          const type = currentStep.type;
-                          if (
-                            type === "doctor" ||
-                            type === "user-input" ||
-                            type === "choice"
-                          ) {
-                            speak(interpolate(currentStep.message || ""));
-                          }
-                        }
-                      }}
-                      className={`flex-1 px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
-                        speed === "normal"
-                          ? "bg-blue-600 text-white"
-                          : "bg-zinc-100 text-zinc-700 hover:bg-zinc-200"
-                      }`}
-                    >{t("Normal")}</button>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setSpeed("fast");
-                        stopSpeaking();
-                        if (audioEnabled && currentStep) {
-                          const type = currentStep.type;
-                          if (
-                            type === "doctor" ||
-                            type === "user-input" ||
-                            type === "choice"
-                          ) {
-                            speak(interpolate(currentStep.message || ""));
-                          }
-                        }
-                      }}
-                      className={`flex-1 px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
-                        speed === "fast"
-                          ? "bg-blue-600 text-white"
-                          : "bg-zinc-100 text-zinc-700 hover:bg-zinc-200"
-                      }`}
-                    >{t("Fast")}</button>
-                  </div>
-                </div>
-
-                {/* Playback Controls */}
-                {audioEnabled && (
-                  <div className="flex items-center gap-2 pt-2 border-t border-zinc-200">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        if (isPaused) {
-                          // If paused, resume
-                          resumeSpeaking();
-                        } else if (isSpeaking) {
-                          // If speaking, pause
-                          pauseSpeaking();
-                        } else {
-                          // If not speaking, start speaking
-                          if (currentStep) {
-                            const type = currentStep.type;
-                            if (
-                              type === "doctor" ||
-                              type === "user-input" ||
-                              type === "choice"
-                            ) {
-                              speak(interpolate(currentStep.message || ""));
-                            }
-                          }
-                        }
-                      }}
-                      className="flex-1 px-3 py-2 bg-blue-50 hover:bg-blue-100 text-blue-700 rounded-lg text-sm font-medium transition-colors"
-                    >
-                      {isPaused ? t("Resume") : (isSpeaking ? t("Pause") : t("Play"))}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={stopSpeaking}
-                      className="px-3 py-2 bg-zinc-100 hover:bg-zinc-200 text-zinc-700 rounded-lg text-sm font-medium transition-colors"
-                    >{t("Stop")}</button>
-                  </div>
-                )}
-              </div>
+              {audioControls}
             </div>
           )}
 
           {renderStoryContent(currentStep)}
-          <div className="px-6 pb-6">
-            {currentStep && (
-              <div>
-                <div className="flex justify-between items-center pt-4 border-t border-zinc-200 lg:hidden">
-                  <div className="flex items-center gap-2">
-                    <button type="button" onClick={handlePrint} disabled={isPrinting || !steps.length} aria-label={t("Print")} className="rounded-xl px-3 py-2 text-zinc-700 hover:bg-zinc-100 disabled:opacity-50">
-                      <Printer className="w-5 h-5" />
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setShowAudioControls(!showAudioControls)}
-                      className="rounded-xl px-3 py-2 text-zinc-700 hover:bg-zinc-100"
-                      aria-label={t("Audio Settings")}
-                    >
-                      <svg
-                        xmlns="http://www.w3.org/2000/svg"
-                        className="w-5 h-5"
-                        viewBox="0 0 20 20"
-                        fill="currentColor"
-                      >
-                        <path
-                          fillRule="evenodd"
-                          d="M9.383 3.076A1 1 0 0110 4v12a1 1 0 01-1.617.793L4.383 13H2a1 1 0 01-1-1V8a1 1 0 011-1h2.383l4.617-3.793a1 1 0 01.383-.131zM14.657 2.929a1 1 0 011.414 0A9.972 9.972 0 0119 10a9.972 9.972 0 01-2.929 7.071 1 1 0 01-1.414-1.414A7.971 7.971 0 0017 10c0-2.21-.894-4.208-2.343-5.657a1 1 0 010-1.414zm-2.829 2.828a1 1 0 011.415 0A5.983 5.983 0 0115 10a5.984 5.984 0 01-1.757 4.243 1 1 0 01-1.415-1.415A3.984 3.984 0 0013 10a3.983 3.983 0 00-1.172-2.828 1 1 0 010-1.415z"
-                          clipRule="evenodd"
-                        />
-                      </svg>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={handleClose}
-                      className="rounded-xl px-4 py-2 text-zinc-700 hover:bg-zinc-100"
-                    >{t("Close")}</button>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        if (currentStepIndex > 0) {
-                          setCurrentStepIndex((idx) => idx - 1);
-                          resetTransientState();
-                        }
-                      }}
-                      disabled={currentStepIndex === 0}
-                      className="rounded-xl px-4 py-2 text-zinc-700 hover:bg-zinc-100 disabled:opacity-30 disabled:cursor-not-allowed"
-                    >{t("Back")}</button>
-                    <button
-                      type="button"
-                      onClick={handleNext}
-                      disabled={
-                        (currentStep.type === "user-input" &&
-                          !userInputValue.trim()) ||
-                        (currentStep.type === "choice" && !selectedChoice)
-                      }
-                      className="rounded-xl px-6 py-2 bg-[#315e4a] text-white hover:bg-[#244a39] disabled:opacity-50 disabled:cursor-not-allowed transition-all"
-                    >
-                      {isLastStep ? t("Finish") : t("Next")}
-                    </button>
-                  </div>
+          {!isModal && (
+            currentStep ? (
+              <nav aria-label={t(isPreview ? "Preview" : "Read")} className="story-preview-pagination mx-6 mb-4 border-t border-[#e3e9df] pt-4">
+                <button
+                  type="button"
+                  onClick={handlePreviousPage}
+                  disabled={currentStepIndex === 0}
+                  className="story-preview-prev story-editor-button is-primary"
+                >
+                  <ArrowLeft className="size-4 shrink-0" aria-hidden="true" />
+                  {t("Previous page")}
+                </button>
+                <span aria-live="polite" className="sr-only">
+                  {t("Page {current} of {total}", { current: currentStepIndex + 1, total: steps.length })}
+                </span>
+                <div className="story-preview-dots" aria-hidden="true">
+                  {steps.map((step, index) => (
+                    <span key={step.id || index} className={index === currentStepIndex ? "is-current" : undefined} />
+                  ))}
                 </div>
-              </div>
-            )}
+                <button
+                  type="button"
+                  onClick={isPreview ? handlePreviewNextPage : handleNext}
+                  disabled={isPreview ? isLastStep : needsResponse}
+                  className="story-preview-next story-editor-button is-primary"
+                >
+                  {t(isReader && isLastStep ? "Finish" : "Next page")}
+                  <ArrowRight className="size-4 shrink-0" aria-hidden="true" />
+                </button>
+              </nav>
+            ) : (
+              <p className="mx-6 mb-4 text-sm text-zinc-600">{t(isPreview ? "Add a step to preview your story." : "This story has no pages yet.")}</p>
+            )
+          )}
 
-            {/* Mobile Audio Controls Panel */}
-            {showAudioControls && (
-              <div className="lg:hidden mt-4 bg-white rounded-xl shadow-lg border border-zinc-200 p-4">
-                <div className="space-y-4">
-                  <div className="flex items-center justify-between">
-                    <h3 className="text-sm font-semibold text-zinc-900">{t("Audio Settings")}</h3>
-                    <button
-                      type="button"
-                      onClick={() => setShowAudioControls(false)}
-                      className="text-zinc-400 hover:text-zinc-600"
-                    >
-                      <svg
-                        xmlns="http://www.w3.org/2000/svg"
-                        className="w-4 h-4"
-                        viewBox="0 0 20 20"
-                        fill="currentColor"
-                      >
-                        <path
-                          fillRule="evenodd"
-                          d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z"
-                          clipRule="evenodd"
-                        />
-                      </svg>
-                    </button>
-                  </div>
-
-                  {/* Enable/Disable Audio */}
-                  <div className="flex items-center justify-between">
-                    <label className="text-sm text-zinc-700">{t("Enable Audio")}</label>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setAudioEnabled(!audioEnabled);
-                        if (audioEnabled) stopSpeaking();
-                      }}
-                      className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
-                        audioEnabled ? "bg-blue-600" : "bg-zinc-300"
-                      }`}
-                    >
-                      <span
-                        className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
-                          audioEnabled ? "translate-x-6" : "translate-x-1"
-                        }`}
-                      />
-                    </button>
-                  </div>
-
-                  {/* Voice Selection */}
-                  <div>
-                    <label className="block text-sm text-zinc-700 mb-2">{t("Voice")}</label>
-                    <div className="flex gap-2">
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setVoiceType("female");
-                          stopSpeaking();
-                          if (audioEnabled && currentStep) {
-                            const type = currentStep.type;
-                            if (
-                              type === "doctor" ||
-                              type === "user-input" ||
-                              type === "choice"
-                            ) {
-                              speak(interpolate(currentStep.message || ""));
-                            }
-                          }
-                        }}
-                        className={`flex-1 px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
-                          voiceType === "female"
-                            ? "bg-blue-600 text-white"
-                            : "bg-zinc-100 text-zinc-700 hover:bg-zinc-200"
-                        }`}
-                      >{t("Female")}</button>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setVoiceType("male");
-                          stopSpeaking();
-                          if (audioEnabled && currentStep) {
-                            const type = currentStep.type;
-                            if (
-                              type === "doctor" ||
-                              type === "user-input" ||
-                              type === "choice"
-                            ) {
-                              speak(interpolate(currentStep.message || ""));
-                            }
-                          }
-                        }}
-                        className={`flex-1 px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
-                          voiceType === "male"
-                            ? "bg-blue-600 text-white"
-                            : "bg-zinc-100 text-zinc-700 hover:bg-zinc-200"
-                        }`}
-                      >{t("Male")}</button>
-                    </div>
-                  </div>
-
-                  {/* Speed Selection */}
-                  <div>
-                    <label className="block text-sm text-zinc-700 mb-2">{t("Speed")}</label>
-                    <div className="flex gap-2">
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setSpeed("slow");
-                          stopSpeaking();
-                          if (audioEnabled && currentStep) {
-                            const type = currentStep.type;
-                            if (
-                              type === "doctor" ||
-                              type === "user-input" ||
-                              type === "choice"
-                            ) {
-                              speak(interpolate(currentStep.message || ""));
-                            }
-                          }
-                        }}
-                        className={`flex-1 px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
-                          speed === "slow"
-                            ? "bg-blue-600 text-white"
-                            : "bg-zinc-100 text-zinc-700 hover:bg-zinc-200"
-                        }`}
-                      >{t("Slow")}</button>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setSpeed("normal");
-                          stopSpeaking();
-                          if (audioEnabled && currentStep) {
-                            const type = currentStep.type;
-                            if (
-                              type === "doctor" ||
-                              type === "user-input" ||
-                              type === "choice"
-                            ) {
-                              speak(interpolate(currentStep.message || ""));
-                            }
-                          }
-                        }}
-                        className={`flex-1 px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
-                          speed === "normal"
-                            ? "bg-blue-600 text-white"
-                            : "bg-zinc-100 text-zinc-700 hover:bg-zinc-200"
-                        }`}
-                      >{t("Normal")}</button>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setSpeed("fast");
-                          stopSpeaking();
-                          if (audioEnabled && currentStep) {
-                            const type = currentStep.type;
-                            if (
-                              type === "doctor" ||
-                              type === "user-input" ||
-                              type === "choice"
-                            ) {
-                              speak(interpolate(currentStep.message || ""));
-                            }
-                          }
-                        }}
-                        className={`flex-1 px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
-                          speed === "fast"
-                            ? "bg-blue-600 text-white"
-                            : "bg-zinc-100 text-zinc-700 hover:bg-zinc-200"
-                        }`}
-                      >{t("Fast")}</button>
-                    </div>
-                  </div>
-
-                  {/* Playback Controls */}
-                  {audioEnabled && (
-                    <div className="flex items-center gap-2 pt-2 border-t border-zinc-200">
-                      <button
-                        type="button"
-                        onClick={() => {
-                          if (isPaused) {
-                            // If paused, resume
-                            resumeSpeaking();
-                          } else if (isSpeaking) {
-                            // If speaking, pause
-                            pauseSpeaking();
-                          } else {
-                            // If not speaking, start speaking
-                            if (currentStep) {
-                              const type = currentStep.type;
-                              if (
-                                type === "doctor" ||
-                                type === "user-input" ||
-                                type === "choice"
-                              ) {
-                                speak(interpolate(currentStep.message || ""));
-                              }
-                            }
-                          }
-                        }}
-                        className="flex-1 px-3 py-2 bg-blue-50 hover:bg-blue-100 text-blue-700 rounded-lg text-sm font-medium transition-colors"
-                      >
-                        {isPaused ? t("Resume") : (isSpeaking ? t("Pause") : t("Play"))}
+          {!isReader && (
+            <div className="px-6 pb-6">
+              {currentStep && (
+                <div>
+                  <div className="flex justify-between items-center pt-4 border-t border-zinc-200 lg:hidden">
+                    <div className="flex items-center gap-2">
+                      <button type="button" onClick={handlePrint} disabled={isPrinting || !steps.length} aria-label={t("Print")} className="rounded-xl px-3 py-2 text-zinc-700 hover:bg-zinc-100 disabled:opacity-50">
+                        <Printer className="w-5 h-5" />
                       </button>
                       <button
                         type="button"
-                        onClick={stopSpeaking}
-                        className="px-3 py-2 bg-zinc-100 hover:bg-zinc-200 text-zinc-700 rounded-lg text-sm font-medium transition-colors"
-                      >{t("Stop")}</button>
+                        onClick={() => setShowAudioControls(!showAudioControls)}
+                        className="rounded-xl px-3 py-2 text-zinc-700 hover:bg-zinc-100"
+                        aria-label={t("Audio Settings")}
+                      >
+                        <svg
+                          xmlns="http://www.w3.org/2000/svg"
+                          className="w-5 h-5"
+                          viewBox="0 0 20 20"
+                          fill="currentColor"
+                        >
+                          <path
+                            fillRule="evenodd"
+                            d="M9.383 3.076A1 1 0 0110 4v12a1 1 0 01-1.617.793L4.383 13H2a1 1 0 01-1-1V8a1 1 0 011-1h2.383l4.617-3.793a1 1 0 01.383-.131zM14.657 2.929a1 1 0 011.414 0A9.972 9.972 0 0119 10a9.972 9.972 0 01-2.929 7.071 1 1 0 01-1.414-1.414A7.971 7.971 0 0017 10c0-2.21-.894-4.208-2.343-5.657a1 1 0 010-1.414zm-2.829 2.828a1 1 0 011.415 0A5.983 5.983 0 0115 10a5.984 5.984 0 01-1.757 4.243 1 1 0 01-1.415-1.415A3.984 3.984 0 0013 10a3.983 3.983 0 00-1.172-2.828 1 1 0 010-1.415z"
+                            clipRule="evenodd"
+                          />
+                        </svg>
+                      </button>
+                      {isModal && (
+                        <button
+                          type="button"
+                          onClick={handleClose}
+                          className="rounded-xl px-4 py-2 text-zinc-700 hover:bg-zinc-100"
+                        >{t("Close")}</button>
+                      )}
                     </div>
-                  )}
+                    {isModal && (
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (currentStepIndex > 0) {
+                              setCurrentStepIndex((idx) => idx - 1);
+                              resetTransientState();
+                            }
+                          }}
+                          disabled={currentStepIndex === 0}
+                          className="rounded-xl px-4 py-2 text-zinc-700 hover:bg-zinc-100 disabled:opacity-30 disabled:cursor-not-allowed"
+                        >{t("Back")}</button>
+                        <button
+                          type="button"
+                          onClick={handleNext}
+                          disabled={
+                            (currentStep.type === "user-input" &&
+                              !userInputValue.trim()) ||
+                            (currentStep.type === "choice" && !selectedChoice)
+                          }
+                          className="rounded-xl px-6 py-2 bg-[#315e4a] text-white hover:bg-[#244a39] disabled:opacity-50 disabled:cursor-not-allowed transition-all"
+                        >
+                          {isLastStep ? t("Finish") : t("Next")}
+                        </button>
+                      </div>
+                    )}
+                  </div>
                 </div>
-              </div>
-            )}
-          </div>
+              )}
+
+              {audioControls && (
+                <div className="lg:hidden mt-4 bg-white rounded-xl shadow-lg border border-zinc-200 p-4">
+                  {audioControls}
+                </div>
+              )}
+            </div>
+          )}
+
         </div>
 
         {/* Parent Guide Panel */}
         {parentGuide && (
-          <div className="lg:w-96 bg-[#fef9f0] border-l border-[#f5e6d3] p-6 flex flex-col overflow-y-auto">
+          <aside
+            aria-label={t("Parent Guide")}
+            aria-live={isReader ? "polite" : undefined}
+            className={isReader ? "story-reader-guide" : "lg:w-96 bg-[#fef9f0] border-l border-[#f5e6d3] p-6 flex flex-col overflow-y-auto"}
+          >
             <div className="flex items-center justify-between mb-4">
               <span className="text-amber-800 text-xs font-semibold tracking-wide uppercase flex items-center gap-1">
                 <svg
@@ -1255,68 +1166,69 @@ export default function StoryPlayer({
               </div>
             ) : null}
 
-            {/* Step Progress */}
-            <div className="mt-auto pt-6 flex items-center justify-between border-t border-amber-200">
-              <button
-                type="button"
-                onClick={() => {
-                  if (currentStepIndex > 0) {
-                    setCurrentStepIndex((idx) => idx - 1);
-                    resetTransientState();
+            {isModal && (
+              <div className="mt-auto pt-6 flex items-center justify-between border-t border-amber-200">
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (currentStepIndex > 0) {
+                      setCurrentStepIndex((idx) => idx - 1);
+                      resetTransientState();
+                    }
+                  }}
+                  disabled={currentStepIndex === 0}
+                  className="w-10 h-10 rounded-full flex items-center justify-center text-amber-800 hover:bg-amber-100 disabled:opacity-30 disabled:cursor-not-allowed transition-all"
+                  aria-label={t("Previous step")}
+                >
+                  <svg
+                    xmlns="http://www.w3.org/2000/svg"
+                    className="w-5 h-5"
+                    viewBox="0 0 20 20"
+                    fill="currentColor"
+                  >
+                    <path
+                      fillRule="evenodd"
+                      d="M12.707 5.293a1 1 0 010 1.414L9.414 10l3.293 3.293a1 1 0 01-1.414 1.414l-4-4a1 1 0 010-1.414l4-4a1 1 0 011.414 0z"
+                      clipRule="evenodd"
+                    />
+                  </svg>
+                </button>
+
+                <span className="text-sm text-amber-800 font-medium">
+                  {currentStepIndex + 1} / {steps.length}
+                </span>
+
+                <button
+                  type="button"
+                  onClick={handleNext}
+                  disabled={
+                    (currentStep?.type === "user-input" &&
+                      !userInputValue.trim()) ||
+                    (currentStep?.type === "choice" && !selectedChoice)
                   }
-                }}
-                disabled={currentStepIndex === 0}
-                className="w-10 h-10 rounded-full flex items-center justify-center text-amber-800 hover:bg-amber-100 disabled:opacity-30 disabled:cursor-not-allowed transition-all"
-                aria-label={t("Previous step")}
-              >
-                <svg
-                  xmlns="http://www.w3.org/2000/svg"
-                  className="w-5 h-5"
-                  viewBox="0 0 20 20"
-                  fill="currentColor"
+                  className="w-10 h-10 rounded-full flex items-center justify-center bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-md"
+                  aria-label={isLastStep ? t("Finish") : t("Next step")}
                 >
-                  <path
-                    fillRule="evenodd"
-                    d="M12.707 5.293a1 1 0 010 1.414L9.414 10l3.293 3.293a1 1 0 01-1.414 1.414l-4-4a1 1 0 010-1.414l4-4a1 1 0 011.414 0z"
-                    clipRule="evenodd"
-                  />
-                </svg>
-              </button>
-
-              <span className="text-sm text-amber-800 font-medium">
-                {currentStepIndex + 1} / {steps.length}
-              </span>
-
-              <button
-                type="button"
-                onClick={handleNext}
-                disabled={
-                  (currentStep?.type === "user-input" &&
-                    !userInputValue.trim()) ||
-                  (currentStep?.type === "choice" && !selectedChoice)
-                }
-                className="w-10 h-10 rounded-full flex items-center justify-center bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-md"
-                aria-label={isLastStep ? t("Finish") : t("Next step")}
-              >
-                <svg
-                  xmlns="http://www.w3.org/2000/svg"
-                  className="w-5 h-5"
-                  viewBox="0 0 20 20"
-                  fill="currentColor"
-                >
-                  <path
-                    fillRule="evenodd"
-                    d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1 0 011.414-1.414l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0z"
-                    clipRule="evenodd"
-                  />
-                </svg>
-              </button>
-            </div>
-          </div>
+                  <svg
+                    xmlns="http://www.w3.org/2000/svg"
+                    className="w-5 h-5"
+                    viewBox="0 0 20 20"
+                    fill="currentColor"
+                  >
+                    <path
+                      fillRule="evenodd"
+                      d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1 0 011.414-1.414l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0z"
+                      clipRule="evenodd"
+                    />
+                  </svg>
+                </button>
+              </div>
+            )}
+          </aside>
         )}
 
         {/* Celebration Overlay */}
-        {showCelebration && (
+        {isModal && showCelebration && (
           <div className="absolute inset-0 z-50 flex items-center justify-center bg-gradient-to-br from-purple-600/95 via-pink-500/95 to-yellow-400/95 backdrop-blur-sm animate-[fadeIn_300ms_ease-out] overflow-hidden">
             {/* Confetti Background */}
             <div className="absolute inset-0 pointer-events-none">

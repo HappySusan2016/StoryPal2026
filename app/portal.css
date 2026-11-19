@@ -1,8 +1,8 @@
 /* Restore the reference project's browser defaults inside the portal so Tailwind Preflight does not override font weights or paragraph spacing.
  * Use the font families registered by next/font and the reference project's fallback order for Chinese characters and symbols. */
-@scope (.portal) {
+@scope (.portal) to (.story-editor-controls) {
   :scope,
-  :where(*) {
+  :where(*):not(:where(.story-delete-icon svg, .story-delete-icon svg *)) {
     all: revert;
   }
   :scope {
@@ -321,6 +321,75 @@
   }
   .secondary.danger:hover {
     background: #fff0e9;
+  }
+  /* Match the workshop cards' warm colors and rounded corners in the storybook deletion dialog. */
+  .story-delete-dialog {
+    position: fixed;
+    inset: 0;
+    margin: auto;
+    width: min(420px, calc(100% - 32px));
+    height: fit-content;
+    max-height: calc(100% - 32px);
+    padding: clamp(20px, 6vw, 32px);
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    background: var(--white);
+    color: var(--ink);
+    box-shadow: 0 20px 60px #24332d40;
+    overflow: auto;
+    overflow-wrap: anywhere;
+  }
+  .story-delete-dialog::backdrop {
+    background: #24332d66;
+  }
+  .story-delete-icon {
+    display: grid;
+    place-items: center;
+    width: 44px;
+    height: 44px;
+    border-radius: 12px;
+    background: #fff0e9;
+    color: #8e4534;
+  }
+  .story-delete-dialog h2 {
+    margin: 14px 0 8px;
+  }
+  .story-delete-dialog p {
+    margin: 8px 0;
+  }
+  .story-delete-name {
+    font-weight: 700;
+  }
+  .story-delete-actions {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    gap: 10px;
+    margin-top: 22px;
+  }
+  .story-delete-actions button {
+    min-height: 44px;
+    transition: background-color 0.2s;
+  }
+  .story-delete-actions button:focus-visible {
+    outline: 2px solid var(--green);
+    outline-offset: 3px;
+  }
+  .story-delete-confirm {
+    padding: 10px 17px;
+    border: 1px solid transparent;
+    border-radius: 7px;
+    background: #8e4534;
+    color: var(--white);
+    font: 700 12px var(--font-body);
+  }
+  .story-delete-confirm:hover:enabled {
+    background: #733526;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .story-delete-actions button {
+      transition: none;
+    }
   }
   .link-btn {
     background: none;
@@ -1032,6 +1101,7 @@
     max-width: 900px;
     margin: 30px auto 60px;
   }
+  .reader-shell.story-reading-page { max-width: 1152px; }
   .reader-top {
     display: flex;
     justify-content: space-between;
@@ -1044,23 +1114,6 @@
     display: flex;
     gap: 8px;
     flex-wrap: wrap;
-  }
-  .tool-btn {
-    text-decoration: none;
-    border: 1px solid var(--line);
-    background: var(--white);
-    border-radius: 999px;
-    padding: 8px 14px;
-    font-size: 11px;
-    font-weight: 600;
-    color: var(--green);
-    display: inline-flex;
-    gap: 6px;
-    align-items: center;
-  }
-  .tool-btn[aria-pressed="true"] {
-    background: var(--mint);
-    border-color: #c9dcc6;
   }
   .reader {
     display: grid;
@@ -1847,7 +1900,7 @@
   @media (min-width: 768px) { .analytics-page .md\:grid-cols-4 { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
   @media (min-width: 1024px) { .analytics-page .lg\:grid-cols-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 }
-/* Keep the legacy storybook layout in dialogs and use consistent form, button, and focus colors. */
+/* Reuse the existing form, button, and focus styles in the editor. */
 .storypal-builder { color: #24332d; }
 .storypal-builder input, .storypal-builder textarea, .storypal-builder select { border-color: #d4dfd1; }
 .storypal-builder :focus-visible { outline: 3px solid #8aab87; outline-offset: 2px; }
@@ -1890,4 +1943,257 @@
   .stats { grid-template-columns: repeat(4, minmax(0, 1fr)); }
   @media (max-width: 640px) { .stats { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
   @media (max-width: 360px) { .stats { grid-template-columns: minmax(0, 1fr); } }
+}
+
+
+/* Reuse the reading card in the editor and collapse AI settings within the steps section. */
+.story-editor-page .reader-top h1 { margin-top: 8px; font-size: 28px; }
+.story-editor-page .reader-top p { margin: 4px 0 0; font-size: 12px; }
+.story-editor-back { font-size: 12px; font-weight: 700; text-decoration: none; }
+.story-preview-stage,
+.story-editor-card {
+  min-width: 0;
+  background: var(--white);
+  border: 1px solid #efede4;
+  border-radius: 24px;
+  box-shadow: var(--card-shadow);
+}
+.story-preview-cover {
+  height: clamp(130px, 25vw, 190px);
+  background: linear-gradient(145deg, #e5eee4, #f9eed8);
+  color: var(--green);
+}
+/* Fill the preview card with the cover image, preserving its aspect ratio and center-cropping it within the height limit. */
+.story-preview-image img {
+  display: block;
+  width: 100%;
+  height: auto;
+  max-height: 620px;
+  object-fit: cover;
+}
+.story-preview-pagination {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 2fr) minmax(0, 1fr);
+  grid-template-areas: "prev dots next";
+  align-items: center;
+  gap: 10px;
+}
+.story-preview-prev { grid-area: prev; justify-self: start; }
+.story-preview-next { grid-area: next; justify-self: end; }
+.story-preview-dots {
+  grid-area: dots;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
+.story-preview-dots span {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #dfe4da;
+}
+.story-preview-dots .is-current {
+  width: 22px;
+  border-radius: 4px;
+  background: var(--green);
+}
+@media (max-width: 520px) {
+  .story-preview-pagination {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-areas: "dots dots" "prev next";
+  }
+}
+
+.story-editor-card { padding: clamp(16px, 3vw, 28px); }
+.story-editor-ai {
+  padding: clamp(12px, 3vw, 20px);
+  border: 1px solid #f3e2cf;
+  border-radius: 16px;
+  background: #fff7ee;
+  color: #4e3f30;
+}
+
+
+/* Use the project's dark green, mint green, and warm colors for editor actions, preview navigation, and save feedback. */
+.story-editor-button {
+  --button-bg: var(--mint-2);
+  --button-hover: var(--mint);
+  --button-text: var(--green-deep);
+  --button-border: #d4dfd1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.45rem;
+  min-height: 40px;
+  padding: 0.45rem 0.75rem;
+  border: 1px solid var(--button-border);
+  border-radius: 12px;
+  background: var(--button-bg);
+  color: var(--button-text);
+  font-size: 0.875rem;
+  font-weight: 600;
+  line-height: 1.25;
+  cursor: pointer;
+  transition: background-color 180ms ease;
+}
+.story-editor-button:not(:disabled):hover { background: var(--button-hover); }
+.story-editor-button:disabled { opacity: 0.5; cursor: not-allowed; }
+.story-editor-button.is-primary,
+.story-editor-button[aria-pressed="true"] {
+  --button-bg: var(--green);
+  --button-hover: var(--green-deep);
+  --button-text: #fff;
+  --button-border: transparent;
+}
+.story-editor-button.is-primary { min-height: 44px; }
+.story-editor-button.is-danger {
+  --button-bg: #fff8f4;
+  --button-hover: #fff0e9;
+  --button-text: #8e4534;
+  --button-border: #efd6cb;
+}
+.story-editor-button.is-icon { width: 40px; flex-shrink: 0; padding-inline: 0; }
+.story-editor-button.is-pill { border-radius: 999px; padding-inline: 0.9rem; }
+.story-editor-controls label.story-editor-button:focus-within {
+  outline: 3px solid var(--sage);
+  outline-offset: 2px;
+}
+.story-editor-controls fieldset:disabled label.story-editor-button {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.story-editor-menu-option {
+  display: block;
+  width: 100%;
+  padding: 0.5rem 0.9rem;
+  border-radius: 6px;
+  color: var(--green-deep);
+  text-align: left;
+  font-size: 0.875rem;
+  cursor: pointer;
+}
+.story-editor-menu-option:hover { background: var(--mint-2); }
+.story-editor-ai-toggle { color: var(--green-deep); min-height: 40px; }
+.story-editor-ai-toggle:hover { color: var(--green); }
+@media (prefers-reduced-motion: reduce) {
+  .story-editor-button { transition: none; }
+}
+
+
+/* Reuse the storybook card on the parent reading page and place the warm guidance card from the reference layout on the right. */
+.story-reader-layout {
+  display: grid;
+  align-items: start;
+  gap: 22px;
+}
+.story-reader-guide {
+  min-width: 0;
+  padding: clamp(16px, 3vw, 22px);
+  border: 1px solid #f3e2cf;
+  border-radius: 20px;
+  background: #fff7ee;
+}
+@media (min-width: 760px) {
+  .story-reader-layout {
+    grid-template-columns: minmax(0, 1.3fr) minmax(245px, 0.7fr);
+  }
+}
+
+
+/* Reuse the portal's rounded buttons for reading tools and let them wrap on narrow screens. */
+.story-reader-header {
+  position: relative;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-bottom: 18px;
+}
+.story-reader-header h1 {
+  margin: 8px 0 0;
+  font-family: var(--font-head);
+  font-size: 28px;
+  font-weight: 700;
+  letter-spacing: -0.045em;
+  overflow-wrap: anywhere;
+}
+.story-reader-header .muted { color: var(--muted); margin-top: 4px; font-size: 12px; }
+.portal .tool-btn {
+  text-decoration: none;
+  border: 1px solid var(--line);
+  background: var(--white);
+  border-radius: 999px;
+  padding: 8px 14px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--green);
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+}
+.portal .tool-btn:is([aria-pressed="true"], [aria-expanded="true"]) {
+  background: var(--mint);
+  border-color: #c9dcc6;
+}
+.portal .tool-btn:not(:disabled) { cursor: pointer; }
+.portal .tool-btn:disabled { opacity: 0.5; }
+.story-reader-tools { display: flex; flex-wrap: wrap; gap: 8px; }
+/* Let read-aloud settings grow with the header or wrap on narrow screens to prevent overflow. */
+.story-reader-audio-panel {
+  position: absolute;
+  z-index: 25;
+  inset-block-start: calc(100% + 8px);
+  inset-inline-end: 0;
+  width: min(100%, 18rem);
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--white);
+  box-shadow: var(--card-shadow);
+}
+.story-reader-layout.story-reader-child { grid-template-columns: minmax(0, 1fr); }
+.story-reader-layout .story-print-step :is(p, input, button) {
+  font-size: calc(1rem * var(--reader-scale));
+  overflow-wrap: anywhere;
+}
+
+/* Light up the three stars in sequence and play one small bounce after a successful claim. */
+.story-reader-completion {
+  padding: clamp(24px, 6vw, 56px) 20px;
+  text-align: center;
+  background: radial-gradient(ellipse at top, #fff4d9, var(--white) 70%);
+}
+.story-reward-stars {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: clamp(8px, 3vw, 18px);
+  margin-bottom: 20px;
+}
+.story-reward-stars svg {
+  width: clamp(38px, 8vw, 58px);
+  height: auto;
+  color: #a36524;
+  fill: #f8cb73;
+  stroke-width: 1.5;
+  animation: story-star-arrive 500ms cubic-bezier(.16, 1, .3, 1) both;
+  animation-delay: calc(var(--star-order) * 90ms);
+}
+.story-reward-stars svg:nth-child(2) { width: clamp(48px, 10vw, 72px); }
+.story-reward-stars.is-collected svg {
+  fill: #f2b74d;
+  animation-name: story-star-collect;
+}
+@keyframes story-star-arrive {
+  from { opacity: 0; transform: translateY(14px) scale(.75); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes story-star-collect {
+  45% { transform: translateY(-9px) scale(1.12); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .story-reward-stars svg { animation: none; }
 }

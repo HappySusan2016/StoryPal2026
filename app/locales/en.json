@@ -463,6 +463,7 @@
   "Unable to sign in. Please try again.": "Unable to sign in. Please try again.",
   "This email is already registered.": "This email is already registered.",
   "Network unavailable. Please try again.": "Network unavailable. Please try again.",
+  "A child profile with this name already exists.": "A child profile with this name already exists.",
   "Could not save changes. Please try again.": "Could not save changes. Please try again.",
   "Current password is incorrect.": "Current password is incorrect.",
   "Stories without a profile": "Stories without a profile",
@@ -735,5 +736,17 @@
   "Activity could not be saved. Please check your connection or access permissions.": "Activity could not be saved. Please check your connection or access permissions.",
   "Activity tracking is currently disabled.": "Activity tracking is currently disabled.",
   "This session is not included in activity tracking.": "This session is not included in activity tracking.",
-  "Activity tracking is ready. Browse a few pages, then refresh.": "Activity tracking is ready. Browse a few pages, then refresh."
+  "Activity tracking is ready. Browse a few pages, then refresh.": "Activity tracking is ready. Browse a few pages, then refresh.",
+  "Story not found.": "Story not found.",
+  "Add a step to preview your story.": "Add a step to preview your story.",
+  "AI step generator": "AI step generator",
+  "Recommended cover size: 1500 × 1000 px (3:2).": "Recommended cover size: 1500 × 1000 px (3:2).",
+  "Page {current} of {total}": "Page {current} of {total}",
+  "Previous page": "Previous page",
+  "Next page": "Next page",
+  "Move up": "Move up",
+  "Move down": "Move down",
+  "This story has no pages yet.": "This story has no pages yet.",
+  "Read aloud": "Read aloud",
+  "Text size": "Text size"
 }

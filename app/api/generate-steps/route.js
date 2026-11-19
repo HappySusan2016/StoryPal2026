@@ -223,6 +223,9 @@ Rules:
 - Prefer template variables like @child.name, @child.pronouns.subject, @child.pronouns.object.
 - Do NOT include any personally identifying info.
 - If you output a choice step, provide 2-4 short options.
+
+Image URLs:
+- Do not generate image URLs. Omit the imageUrl field and do not include image URLs in the step text.
 `;
 
     const userPrompt = `
@@ -254,7 +257,6 @@ previousSteps: ${JSON.stringify(previousSteps)}
               minItems: 2,
               maxItems: 4,
             },
-            imageUrl: { type: "string" },
           },
           required: ["type", "message"],
         },
@@ -379,13 +381,13 @@ previousSteps: ${JSON.stringify(previousSteps)}
                         message: "string",
                         placeholder: "string (user-input only, optional)",
                         options: ["string (choice only, 2-4)"],
-                        imageUrl: "string (optional)",
                       },
                     },
                     null,
                     2
                   ) +
-                  "\nReturn ONLY the JSON object. No markdown.\n\nINPUT:\n" +
+                  "\nDo not include image URLs or the imageUrl field.\n" +
+                  "Return ONLY the JSON object. No markdown.\n\nINPUT:\n" +
                   text,
               },
             ],

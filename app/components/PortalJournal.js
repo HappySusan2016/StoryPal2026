@@ -3,8 +3,9 @@
 import { useState } from "react";
 import { useTranslation } from "../hooks/useTranslation";
 import { toMillis } from "../lib/portalData";
+import { DEFAULT_MODULES, getDefaultStoryTemplate } from "../lib/defaultModules";
 
-/** @module Local reflection journal */
+/** @module Reflection journal */
 export default function PortalJournal({
   modules,
   reflections,
@@ -13,12 +14,26 @@ export default function PortalJournal({
 }) {
   const { t, language } = useTranslation();
   const [editing, setEditing] = useState(null);
+  // Group default storybooks by template ID and list custom storybooks by their own IDs.
+  const storiesById = new Map(modules.map(story => [story.id, story]));
+  const storyOptions = new Map();
+  for (const story of modules) {
+    const option = getDefaultStoryTemplate(story) || story;
+    storyOptions.set(option.id, option);
+  }
+  const originalStory = storiesById.get(editing?.storyId);
+  const editingStoryId = (originalStory && getDefaultStoryTemplate(originalStory)?.id)
+    || editing?.storyId || "";
+
   function handleSave(event) {
     event.preventDefault();
     const data = new FormData(event.currentTarget);
     onSave({
       id: editing?.id,
-      storyId: data.get("storyId"),
+      // When editing an older entry, preserve its original storybook link unless the user changes it.
+      storyId: editing && data.get("storyId") === editingStoryId
+        ? editing.storyId
+        : data.get("storyId"),
       childComfort: Number(data.get("childComfort")),
       parentConfidence: Number(data.get("parentConfidence")),
       observations: data.get("observations"),
@@ -75,11 +90,16 @@ export default function PortalJournal({
               <select
                 id="journal-story"
                 name="storyId"
-                defaultValue={editing?.storyId || ""}
+                defaultValue={editingStoryId}
                 required
               >
                 <option value="">{t("Choose a story…")}</option>
-                {modules.map((story) => (
+                {editingStoryId && !storyOptions.has(editingStoryId) && (
+                  <option value={editingStoryId}>
+                    {DEFAULT_MODULES.find(story => story.id === editingStoryId)?.title || t("Story")}
+                  </option>
+                )}
+                {Array.from(storyOptions.values()).map((story) => (
                   <option key={story.id} value={story.id}>
                     {story.title}
                   </option>
@@ -176,7 +196,8 @@ export default function PortalJournal({
                     <div className="entry-head">
                       <div>
                         <b>
-                          {modules.find((m) => m.id === entry.storyId)?.title ||
+                          {storiesById.get(entry.storyId)?.title ||
+                            DEFAULT_MODULES.find(story => story.id === entry.storyId)?.title ||
                             t("Story")}
                         </b>
                         <span>

@@ -22,7 +22,7 @@ function getFont() {
 }
 
 /** @module Shared portal navigation */
-export default function PortalShell({ children }) {
+export default function PortalShell({ children, childReading = false }) {
   const { t, language } = useTranslation();
   const pathname = usePathname();
   const font = useSyncExternalStore(subscribeFont, getFont, () => "classic");
@@ -66,7 +66,8 @@ export default function PortalShell({ children }) {
                 href={href}
                 aria-current={
                   pathname === href ||
-                  (href === "/" && pathname.startsWith("/profiles/"))
+                  (href === "/child" && childReading) ||
+                  (href === "/" && !childReading && (pathname.startsWith("/profiles/") || pathname.startsWith("/stories/")))
                     ? "page"
                     : undefined
                 }

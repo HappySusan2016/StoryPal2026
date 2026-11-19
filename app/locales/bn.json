@@ -463,6 +463,7 @@
   "Unable to sign in. Please try again.": "সাইন ইন করা যায়নি। আবার চেষ্টা করুন।",
   "This email is already registered.": "এই ইমেইল ইতিমধ্যে নিবন্ধিত।",
   "Network unavailable. Please try again.": "নেটওয়ার্ক নেই। আবার চেষ্টা করুন।",
+  "A child profile with this name already exists.": "এই নামে একটি শিশুর প্রোফাইল ইতিমধ্যে আছে।",
   "Could not save changes. Please try again.": "পরিবর্তন সংরক্ষণ করা যায়নি। আবার চেষ্টা করুন।",
   "Current password is incorrect.": "বর্তমান পাসওয়ার্ড ভুল।",
   "Stories without a profile": "প্রোফাইল ছাড়া গল্প",
@@ -735,5 +736,17 @@
   "Activity could not be saved. Please check your connection or access permissions.": "কার্যকলাপ সংরক্ষণ হয়নি। সংযোগ বা অনুমতি পরীক্ষা করুন।",
   "Activity tracking is currently disabled.": "কার্যকলাপ রেকর্ড বন্ধ আছে।",
   "This session is not included in activity tracking.": "এই সেশন কার্যকলাপ রেকর্ডে অন্তর্ভুক্ত নয়।",
-  "Activity tracking is ready. Browse a few pages, then refresh.": "কার্যকলাপ রেকর্ড প্রস্তুত। কয়েকটি পাতা দেখে রিফ্রেশ করুন।"
+  "Activity tracking is ready. Browse a few pages, then refresh.": "কার্যকলাপ রেকর্ড প্রস্তুত। কয়েকটি পাতা দেখে রিফ্রেশ করুন।",
+  "Story not found.": "গল্পটি পাওয়া যায়নি।",
+  "Add a step to preview your story.": "গল্পের পূর্বরূপ দেখতে একটি ধাপ যোগ করুন।",
+  "AI step generator": "এআই দিয়ে ধাপ তৈরি",
+  "Recommended cover size: 1500 × 1000 px (3:2).": "প্রচ্ছদের প্রস্তাবিত মাপ: ১৫০০ × ১০০০ পিক্সেল (৩:২)।",
+  "Page {current} of {total}": "পৃষ্ঠা {current} / {total}",
+  "Previous page": "আগের পৃষ্ঠা",
+  "Next page": "পরের পৃষ্ঠা",
+  "Move up": "উপরে সরান",
+  "Move down": "নিচে সরান",
+  "This story has no pages yet.": "এই গল্পে এখনো কোনো পৃষ্ঠা নেই।",
+  "Read aloud": "জোরে পড়ুন",
+  "Text size": "লেখার আকার"
 }

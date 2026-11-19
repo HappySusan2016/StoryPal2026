@@ -1,4 +1,4 @@
-/* Default storybooks from before the redesign. Each child gets a separate copy. */
+/* Built-in storybook templates and per-child copies. */
 export const DEFAULT_MODULES = [
   {
     id: "demo-green-mission",
@@ -188,7 +188,14 @@ export const DEFAULT_MODULES = [
 ];
 
 
-/** Create separate storybooks for a new child. Use stable IDs so retries cannot create duplicates. */
+/** Identify templates using the existing ID convention, including legacy storybooks and per-child copies. */
+export function getDefaultStoryTemplate(story) {
+  return DEFAULT_MODULES.find(template =>
+    story.id === template.id || story.id === `${story.childId}-${template.id}`,
+  );
+}
+
+/** Create separate storybooks for a new child. Stable IDs prevent duplicate copies on retry. */
 export function createDefaultModules(childId, createdAt = new Date().toISOString()) {
   return DEFAULT_MODULES.map(story => ({
     ...structuredClone(story), id: `${childId}-${story.id}`, childId,

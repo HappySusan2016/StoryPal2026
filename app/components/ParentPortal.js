@@ -1,12 +1,14 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState, useRef } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
-import StoryPlayer from "./StoryPlayer";
+import StoryPlayer, { interpolateStoryText } from "./StoryPlayer";
 import PortalDashboard from "./PortalDashboard";
 import PortalShell from "./PortalShell";
 import { PortalLanding } from "./PortalAuth";
 import { detachProfileFromStories, getProfileStories } from "../lib/portalData";
+import { hasDuplicateChildName } from "../lib/passportFields";
 import { createDefaultModules, getMissingDefaultModules } from "../lib/defaultModules";
 import PortalJournal from "./PortalJournal";
 
@@ -19,18 +21,22 @@ import {
   deleteDoc,
   doc,
   getDocs,
+  getDocsFromServer,
   serverTimestamp,
   runTransaction,
   setDoc,
+  updateDoc,
   writeBatch,
 } from "firebase/firestore";
 import { AlertTriangle, Check, LoaderCircle, RotateCcw } from "lucide-react";
+import { awardReadingStars, saveReadingPage } from "../lib/readingSessions";
 import { generateModuleGuides } from "../lib/parentGuides";
 
 /** @module Legacy cache compatibility */
 const STORAGE_KEY = "storypal.modules";
 const PASSPORTS_KEY = "storypal.passports";
 const REFLECTIONS_KEY = "storypal.reflections";
+const STORY_DRAFT_KEY = "storypal.story-draft";
 
 function scopedKey(base, uid) {
   return uid ? `${base}.${uid}` : base;
@@ -147,31 +153,28 @@ const PARENT_TRAINING_MODULE = {
 };
 
 /** @module Parent portal state and authentication */
-export default function ParentPortal({ initialProfileId = null }) {
+export default function ParentPortal({ initialProfileId = null, storyEditor = null, storyReader = null }) {
   const router = useRouter();
   const { t } = useTranslation();
-  const savedModulesRef = useRef(null);
-  const storyBuilderRef = useRef(null);
   const [modules, setModules] = useState([]);
   const [passports, setPassports] = useState([]);
-  const [selectedPassportId, setSelectedPassportId] = useState(null);
   /** @module Local reflection journal state */
   const [reflections, setReflections] = useState([]);
-  /** @module Legacy storybook editing and preview state */
-  const [editingModuleId, setEditingModuleId] = useState(null);
-  const [storyDraft, setStoryDraft] = useState(null);
-  const [showStoryBuilder, setShowStoryBuilder] = useState(false);
-  const [showPreview, setShowPreview] = useState(false);
-  const [previewModule, setPreviewModule] = useState(null);
+  /** @module Parent training dialog */
+  const [showTraining, setShowTraining] = useState(false);
   const [authReady, setAuthReady] = useState(false);
   const [authChecking, setAuthChecking] = useState(true);
   const [currentUser, setCurrentUser] = useState(null);
   const [modulesLoading, setModulesLoading] = useState(true);
   const [dataError, setDataError] = useState("");
+  const [readingSaveError, setReadingSaveError] = useState(false);
+  const readingSessionRef = useRef(null);
 
   /** @module Authentication state and account data loading */
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, (user) => {
+      readingSessionRef.current = null;
+      setReadingSaveError(false);
       setModules([]);
       setPassports([]);
       setReflections([]);
@@ -242,9 +245,6 @@ export default function ParentPortal({ initialProfileId = null }) {
         if (!cancelled) {
           setPassports(cloudPassports);
           savePassportsToStorage(cloudPassports, uid);
-          if (cloudPassports.length > 0) {
-            setSelectedPassportId(cloudPassports[0].id);
-          }
         }
       } catch (err) {
         console.error("Failed to load passports from Firestore", err);
@@ -256,9 +256,6 @@ export default function ParentPortal({ initialProfileId = null }) {
         const loadedPassports = loadPassportsFromStorage(uid);
         if (!cancelled) {
           setPassports(loadedPassports);
-          if (loadedPassports.length > 0) {
-            setSelectedPassportId(loadedPassports[0].id);
-          }
         }
       }
 
@@ -367,11 +364,6 @@ export default function ParentPortal({ initialProfileId = null }) {
   /** @module Display filtering preserves raw data and leaves deletion and caching unaffected */
   const profileStories = useMemo(() => getProfileStories(modules, passports), [modules, passports]);
 
-  const selectedPassport = useMemo(
-    () => passports.find((p) => p.id === selectedPassportId) || null,
-    [passports, selectedPassportId],
-  );
-
   async function deleteModule(id) {
     const next = modules.filter((m) => m.id !== id);
     if (currentUser?.uid) {
@@ -384,10 +376,6 @@ export default function ParentPortal({ initialProfileId = null }) {
     }
     setModules(next);
     saveModulesToStorage(next, currentUser?.uid);
-    if (editingModuleId === id) {
-      setEditingModuleId(null);
-      setShowStoryBuilder(false);
-    }
   }
 
   /** @module Parent guide generation on save */
@@ -423,7 +411,7 @@ export default function ParentPortal({ initialProfileId = null }) {
       );
       const steps = await generateModuleGuides(
         moduleDefinition,
-        editingModuleId ? initialSteps : [],
+        storyEditor.storyId ? initialSteps : [],
         passport ? buildContextFromPassport(passport) : {},
         { onProgress: setGuideProgress, onFailure: handleGuideFailure },
       );
@@ -441,112 +429,143 @@ export default function ParentPortal({ initialProfileId = null }) {
     }
   }
 
+  /** @module Storybook, profile, and return path */
+  const storyPage = storyReader || storyEditor;
+  const existingStory = storyPage?.storyId
+    ? modules.find((story) => story.id === storyPage.storyId)
+    : null;
+  const storyPassport = passports.find((passport) =>
+    passport.id === (existingStory?.childId ?? storyEditor?.childId));
+  const childReader = storyReader?.childMode === true;
+  const bookshelfHref = childReader && storyReader.bookshelfProfile !== null
+    ? `/child?profile=${encodeURIComponent(storyReader.bookshelfProfile)}`
+    : "/child";
+  const storyBackHref = childReader ? bookshelfHref : storyPage?.fromProfile && storyPassport
+    ? `/profiles/${encodeURIComponent(storyPassport.id)}`
+    : "/";
+
+  /** @module Child reading progress and rewards */
+  function handleChildPageConfirmed(pageIndex, completed) {
+    const uid = currentUser?.uid;
+    if (!uid || auth.currentUser?.uid !== uid || !storyPassport || !existingStory) return;
+    readingSessionRef.current ??= {
+      id: crypto.randomUUID(),
+      childId: storyPassport.id,
+      moduleId: existingStory.id,
+    };
+    saveReadingPage(uid, readingSessionRef.current, pageIndex, completed).catch((error) => {
+      console.error("Failed to save reading page", error);
+      if (auth.currentUser?.uid === uid) setReadingSaveError(true);
+    });
+  }
+
+  function handleChildStarsCollected(childId, moduleId, stars) {
+    const uid = currentUser?.uid;
+    if (!uid || auth.currentUser?.uid !== uid || childId !== storyPassport?.id || moduleId !== existingStory?.id) {
+      return Promise.reject(new Error("Reading account changed"));
+    }
+    return awardReadingStars(uid, childId, moduleId, stars);
+  }
+
+  function handleReadAgain() {
+    readingSessionRef.current = null;
+    setReadingSaveError(false);
+  }
+
+  function getNewStoryTitle() {
+    if (!storyEditor.draftId) return "";
+    try {
+      const draft = JSON.parse(sessionStorage.getItem(scopedKey(STORY_DRAFT_KEY, currentUser.uid)));
+      return draft?.draftId === storyEditor.draftId && typeof draft.title === "string" ? draft.title : "";
+    } catch {
+      // If session storage is unavailable, enter the title in the editor.
+      return "";
+    }
+  }
+
+  /** @module Storybook persistence */
   async function persistModule(moduleDefinition) {
     const uid = currentUser?.uid;
-    const moduleWithMeta = {
-      ...moduleDefinition,
-      createdAt: moduleDefinition.createdAt || new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-    };
-
-    if (uid) {
-      await setDoc(doc(db, "users", uid, "modules", moduleWithMeta.id), {
-        ...moduleWithMeta, updatedAt: serverTimestamp(),
-      }, { merge: true });
-    }
-
-    const next = [...modules];
-    const existingIdx = next.findIndex((m) => m.id === moduleWithMeta.id);
-    if (existingIdx >= 0) {
-      next[existingIdx] = moduleWithMeta;
+    const storyRef = doc(db, "users", uid, "modules", moduleDefinition.id);
+    const updatedAt = new Date().toISOString();
+    const changes = { ...moduleDefinition, updatedAt: serverTimestamp() };
+    // Update only editable fields to preserve the creation time and avoid recreating deleted records.
+    if (existingStory) {
+      await updateDoc(storyRef, changes);
     } else {
-      next.unshift(moduleWithMeta);
+      await setDoc(storyRef, { ...changes, createdAt: updatedAt });
     }
-    setModules(next);
-    saveModulesToStorage(next, uid);
-    setEditingModuleId(null);
-    setShowStoryBuilder(false);
-
-    // Return to the previous position in the storybook list after saving.
-    setTimeout(() => {
-      if (savedModulesRef.current) {
-        savedModulesRef.current.scrollIntoView({
-          behavior: "smooth",
-          block: "start",
-        });
-      }
-    }, 100);
-
-  }
-
-  function handleModulePreview(modulePreview) {
-    setPreviewModule(modulePreview);
-    setShowPreview(true);
-  }
-
-  function handleModuleEdit(module) {
-    setEditingModuleId(module.id);
-    setShowStoryBuilder(true);
-  }
-
-  function openCreateStory() {
-    setEditingModuleId(null);
-    setShowStoryBuilder(true);
-  }
-
-  function closeStoryBuilder() {
-    if (savingModuleRef.current) return;
-    setShowStoryBuilder(false);
-    setEditingModuleId(null);
-  }
-
-  // Lock background scrolling while the creation dialog is open.
-  useEffect(() => {
-    if (typeof document === "undefined") return;
-    if (!showStoryBuilder) return;
-
-    // Move focus into the dialog, trap Tab navigation, and restore focus on close.
-    const previousFocus = document.activeElement;
-    const dialog = storyBuilderRef.current;
-    const getControls = () => Array.from(dialog?.querySelectorAll('button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [tabindex="0"]') || []).filter(element => element.getClientRects().length);
-    getControls()[0]?.focus();
-    function handleDialogKey(event) {
-      if (event.key === "Escape") {
-        event.preventDefault();
-        if (!savingModuleRef.current) {
-          setShowStoryBuilder(false);
-          setEditingModuleId(null);
-        }
-      }
-      if (event.key !== "Tab") return;
-      const controls = getControls();
-      const first = controls[0];
-      const last = controls.at(-1);
-      if ((event.shiftKey && document.activeElement === first) || (!event.shiftKey && document.activeElement === last)) {
-        event.preventDefault();
-        (event.shiftKey ? last : first)?.focus();
-      }
-    }
-    dialog?.addEventListener("keydown", handleDialogKey);
-    const prevOverflow = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
-
-    return () => {
-      document.body.style.overflow = prevOverflow;
-      dialog?.removeEventListener("keydown", handleDialogKey);
-      previousFocus?.focus();
+    const savedStory = {
+      ...(existingStory || { createdAt: updatedAt }),
+      ...moduleDefinition,
+      updatedAt,
     };
-  }, [showStoryBuilder]);
+    const next = existingStory
+      ? modules.map((story) => story.id === savedStory.id ? savedStory : story)
+      : [savedStory, ...modules];
+    setModules(next);
+    try {
+      saveModulesToStorage(next, uid);
+    } catch (error) {
+      // Return to the list even if the cache write fails after the cloud save.
+      console.error("Failed to cache story", error);
+    }
+    router.replace(storyBackHref);
+  }
 
-  /** @module Portal profile persistence */
+  /** @module Open the reading page from the list */
+  function handleModuleRead(story) {
+    const href = `/stories/${encodeURIComponent(story.id)}`;
+    router.push(initialProfileId ? `${href}?from=profile` : href);
+  }
+
+  /** @module Open the editor from the list */
+  function handleModuleEdit(story) {
+    const href = `/stories/${encodeURIComponent(story.id)}/edit`;
+    router.push(initialProfileId ? `${href}?from=profile` : href);
+  }
+
+  /** @module Creation page navigation and title handoff */
+  function handleCreateStory(childId, title = "") {
+    const params = new URLSearchParams({ child: childId });
+    if (initialProfileId) params.set("from", "profile");
+    if (title) {
+      // The title may contain personal information, so pass it through this tab's session storage.
+      try {
+        const draftId = crypto.randomUUID();
+        sessionStorage.setItem(scopedKey(STORY_DRAFT_KEY, currentUser.uid), JSON.stringify({ draftId, title }));
+        params.set("draft", draftId);
+      } catch {
+        window.alert(t("Could not save changes. Please try again."));
+        return;
+      }
+    }
+    router.push(`/stories/new?${params}`);
+  }
+
+  /** @module Child profile persistence */
   async function handleSavePassport(passport) {
-    // Save the new profile and default storybooks atomically to avoid partially created profiles.
-    const isNew = !passports.some(p => p.id === passport.id);
-    const defaults = isNew ? createDefaultModules(passport.id) : [];
-    const batch = writeBatch(db);
-    batch.set(doc(db, "users", currentUser.uid, "passports", passport.id), { ...passport, updatedAt: serverTimestamp() }, { merge: true });
-    defaults.forEach(story => batch.set(doc(db, "users", currentUser.uid, "modules", story.id), story));
-    await batch.commit();
+    const uid = currentUser.uid;
+    const accountRef = doc(db, "users", uid);
+    const passportsRef = collection(accountRef, "passports");
+    const passportRef = doc(passportsRef, passport.id);
+    const defaults = await runTransaction(db, async (transaction) => {
+      // All profile saves read and write the same account document so concurrent saves across tabs recheck the latest profile list.
+      await transaction.get(accountRef);
+      const existing = await transaction.get(passportRef);
+      const snapshot = await getDocsFromServer(passportsRef);
+      const currentPassports = snapshot.docs.map(item => ({ ...item.data(), id: item.id }));
+      if (hasDuplicateChildName(passport, currentPassports, existing.data())) {
+        throw Object.assign(new Error("Duplicate child name"), { code: "duplicate-child-name" });
+      }
+
+      // Commit the profile and its default storybooks together to prevent partial creation.
+      const stories = existing.exists() ? [] : createDefaultModules(passport.id);
+      transaction.set(accountRef, { passportsUpdatedAt: serverTimestamp() }, { merge: true });
+      transaction.set(passportRef, { ...passport, updatedAt: serverTimestamp() }, { merge: true });
+      stories.forEach(story => transaction.set(doc(accountRef, "modules", story.id), story));
+      return stories;
+    });
     if (defaults.length) {
       const nextModules = [...modules, ...defaults];
       setModules(nextModules);
@@ -557,7 +576,6 @@ export default function ParentPortal({ initialProfileId = null }) {
       : [...passports, passport];
     setPassports(next);
     savePassportsToStorage(next, currentUser.uid);
-    setSelectedPassportId(passport.id);
   }
 
   /** Unlink storybooks in batches before deleting the profile. Keep the profile available for retry if unlinking fails. */
@@ -586,7 +604,6 @@ export default function ParentPortal({ initialProfileId = null }) {
     savePassportsToStorage(next, currentUser.uid);
     setModules(allModules);
     saveModulesToStorage(allModules, currentUser.uid);
-    if (selectedPassportId === id) setSelectedPassportId(next[0]?.id || null);
   }
 
   if (authChecking)
@@ -604,239 +621,236 @@ export default function ParentPortal({ initialProfileId = null }) {
       </PortalShell>
     );
 
+  /** @module Progress saving and parent guide retries */
+  const guideStatus = savingModule && (
+    <div
+      className={`sticky top-0 z-10 mb-5 rounded-2xl border p-4 shadow-sm sm:p-5 ${guideFailure ? "border-amber-200 bg-amber-50" : "border-purple-200 bg-purple-50"}`}
+    >
+      <div className="flex items-start gap-3 sm:gap-4">
+        <div
+          className={`flex size-10 shrink-0 items-center justify-center rounded-xl border bg-white ${guideFailure ? "border-amber-200 text-amber-700" : "border-purple-200 text-[#315e4a]"}`}
+        >
+          {guideFailure ? (
+            <AlertTriangle className="size-5" aria-hidden="true" />
+          ) : (
+            <LoaderCircle
+              className="size-5 motion-safe:animate-spin"
+              aria-hidden="true"
+            />
+          )}
+        </div>
+        <div className="min-w-0 flex-1">
+          {guideFailure ? (
+            <>
+              <div role="alert" className="space-y-1">
+                <h3 className="text-sm font-semibold leading-6 text-amber-950">
+                  {guideFailure.timedOut
+                    ? t("Guide generation timed out.")
+                    : t("Some parent guides could not be generated.")}
+                </h3>
+                <p className="text-sm leading-6 text-amber-900">{t("Your edits and successful guides are retained.")}</p>
+                <p className="flex flex-wrap items-center gap-2 pt-2 text-xs font-medium text-amber-900">
+                  <span>{t("Steps to retry:")}</span>
+                  {guideFailure.failedSteps.map((step) => (
+                    <span
+                      key={step}
+                      className="inline-flex min-w-7 items-center justify-center rounded-lg border border-amber-200 bg-white px-2 py-1 tabular-nums"
+                    >
+                      {step}
+                    </span>
+                  ))}
+                </p>
+              </div>
+              <div className="mt-4 flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:gap-3">
+                <button
+                  type="button"
+                  onClick={() => handleGuideDecision(true)}
+                  className="story-editor-button is-primary"
+                >
+                  <Check className="size-4" aria-hidden="true" />{t("Save existing results")}</button>
+                <button
+                  type="button"
+                  onClick={() => handleGuideDecision(false)}
+                  className="story-editor-button"
+                >
+                  <RotateCcw
+                    className="size-4"
+                    aria-hidden="true"
+                  />{t("Retry failed steps")}</button>
+              </div>
+            </>
+          ) : (
+            <>
+              <div
+                role="status"
+                aria-atomic="true"
+                className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1"
+              >
+                <h3 className="text-sm font-semibold leading-6 text-[#315e4a]">
+                  {guideProgress
+                    ? t("Processing parent guides")
+                    : t("Preparing parent guides…")}
+                </h3>
+                {guideProgress && (
+                  <span className="rounded-lg border border-purple-200 bg-white px-2.5 py-1 text-xs font-semibold tabular-nums text-[#315e4a]">
+                    {guideProgress.completed} /{" "}
+                    {guideProgress.total}
+                  </span>
+                )}
+              </div>
+              {guideProgress && guideProgress.total > 0 && (
+                <progress
+                  aria-label={t("Parent guide processing progress")}
+                  value={guideProgress.completed}
+                  max={guideProgress.total}
+                  className="mt-3 block h-2 w-full overflow-hidden rounded-full border-0 bg-purple-100 [&::-webkit-progress-bar]:rounded-full [&::-webkit-progress-bar]:bg-purple-100 [&::-webkit-progress-value]:rounded-full [&::-webkit-progress-value]:bg-[#315e4a] [&::-moz-progress-bar]:rounded-full [&::-moz-progress-bar]:bg-[#315e4a]"
+                />
+              )}
+            </>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+
+  /** @module Shared layout for reading, creating, and editing storybooks */
+  if (storyPage) {
+    const backLabel = childReader ? `← ${t("Back to story time")}` : storyPage.fromProfile && storyPassport
+      ? `← ${t("Back to {nickname}", { nickname: storyPassport.childName })}`
+      : t("← Back to your space");
+    const isEditing = Boolean(storyEditor?.storyId);
+    const readerContext = storyReader ? buildContextFromPassport(storyPassport) : null;
+    const title = storyReader
+      ? interpolateStoryText(existingStory?.title, readerContext) || t("Read")
+      : t(isEditing ? "Edit story" : "Create story");
+    const storyError = storyPage.storyId
+      ? (!existingStory || (childReader && !storyPassport)) && (dataError || "Story not found.")
+      : !storyPassport && (storyEditor.childId
+        ? "Profile not found."
+        : !passports.length && "Create a communication passport to personalize stories for your child.");
+
+    const heading = (
+      <div>
+        {savingModule ? (
+          <span className="story-editor-back" aria-disabled="true">{backLabel}</span>
+        ) : (
+          <Link className="story-editor-back" href={storyBackHref}>{backLabel}</Link>
+        )}
+        <h1>{title}</h1>
+        {storyPassport && <p className="muted">{storyPassport.childName}</p>}
+      </div>
+    );
+    const showReader = storyReader && !modulesLoading && !storyError;
+
+    return (
+      <PortalShell childReading={childReader}>
+        <main className={`reader-shell story-editor-page${storyReader ? " story-reading-page" : ""}`}>
+          {!showReader && <header className="reader-top">{heading}</header>}
+          {modulesLoading ? (
+            <p role="status">{t("Loading…")}</p>
+          ) : storyError ? (
+            <p role="alert">{t(storyError)}</p>
+          ) : (
+            <>
+              {dataError && <p role="status">{t(dataError)}</p>}
+              {readingSaveError && <p role="alert">{t("Could not save changes. Please try again.")}</p>}
+              <div className="story-editor-controls storypal-builder">
+                {storyReader ? (
+                  <StoryPlayer
+                    layout="reader"
+                    moduleDefinition={existingStory}
+                    templateContext={readerContext}
+                    readerHeading={heading}
+                    childMode={childReader}
+                    narrate={childReader}
+                    childId={childReader ? storyPassport.id : null}
+                    onStarsCollected={childReader ? handleChildStarsCollected : undefined}
+                    onPageConfirmed={childReader ? handleChildPageConfirmed : undefined}
+                    onReadAgain={childReader ? handleReadAgain : undefined}
+                    onFinished={() => router.replace(storyBackHref)}
+                  />
+                ) : (
+                  <>
+                    {guideStatus}
+                    <StoryModules
+                      passports={passports}
+                      initialData={existingStory || { childId: storyPassport?.id, title: getNewStoryTitle() }}
+                      getTemplateContext={buildContextFromPassport}
+                      onSave={handleModuleSave}
+                      saving={savingModule}
+                    />
+                  </>
+                )}
+              </div>
+            </>
+          )}
+        </main>
+      </PortalShell>
+    );
+  }
+
   return (
     <>
       <PortalShell>
-        <div ref={savedModulesRef}>
-          <PortalDashboard
-            initialProfileId={initialProfileId}
-            onSignOut={handleSignOut}
-            user={currentUser}
-            passports={passports}
-            modules={profileStories}
-            loading={modulesLoading}
-            loadError={dataError}
-            onSavePassport={handleSavePassport}
-            onDeletePassport={handleDeletePassport}
-            onCreate={(id, moment = "") => {
-              setSelectedPassportId(id);
-              setStoryDraft({
-                childId: id,
-                title: moment,
-                stageDesign: {
-                  framing: {
-                    focus: "greeting",
-                    scenario: "school",
-                    tone: "brave",
-                    parentGoal: "",
-                  },
-                },
-              });
-              openCreateStory();
-            }}
-            onEdit={(story) => {
-              setSelectedPassportId(story.childId);
-              handleModuleEdit(story);
-            }}
-            onRead={(story) => {
-              setSelectedPassportId(story.childId);
-              setPreviewModule(story);
-              setShowPreview(true);
-            }}
-            onDeleteStory={deleteModule}
-            onTraining={() => {
-              setPreviewModule(PARENT_TRAINING_MODULE);
-              setShowPreview(true);
-            }}
-            journal={
-              <PortalJournal
-                modules={profileStories}
-                reflections={reflections}
-                onSave={(reflectionData) => {
-                  const reflection = {
-                    id: reflectionData.id || `${Date.now()}`,
-                    storyId: reflectionData.storyId,
-                    childComfort: reflectionData.childComfort,
-                    parentConfidence: reflectionData.parentConfidence,
-                    observations: reflectionData.observations.trim(),
-                    successMoments: reflectionData.successMoments.trim(),
-                    createdAt: reflectionData.id
-                      ? reflections.find((r) => r.id === reflectionData.id)
-                          ?.createdAt || new Date().toISOString()
-                      : new Date().toISOString(),
-                    updatedAt: new Date().toISOString(),
-                  };
-                  const next = [...reflections];
-                  const existingIdx = next.findIndex(
-                    (r) => r.id === reflection.id,
-                  );
-                  if (existingIdx >= 0) {
-                    next[existingIdx] = reflection;
-                  } else {
-                    next.push(reflection);
-                  }
-                  setReflections(next);
-                  saveReflectionsToStorage(next, currentUser?.uid);
-                }}
-                onDelete={(id) => {
-                  const next = reflections.filter((r) => r.id !== id);
-                  setReflections(next);
-                  saveReflectionsToStorage(next, currentUser?.uid);
-                }}
-              />
-            }
-          />
-        </div>
+        <PortalDashboard
+          initialProfileId={initialProfileId}
+          onSignOut={handleSignOut}
+          user={currentUser}
+          passports={passports}
+          modules={profileStories}
+          loading={modulesLoading}
+          loadError={dataError}
+          onSavePassport={handleSavePassport}
+          onDeletePassport={handleDeletePassport}
+          onCreate={handleCreateStory}
+          onEdit={handleModuleEdit}
+          onRead={handleModuleRead}
+          onDeleteStory={deleteModule}
+          onTraining={() => setShowTraining(true)}
+          journal={
+            <PortalJournal
+              modules={profileStories}
+              reflections={reflections}
+              onSave={(reflectionData) => {
+                const reflection = {
+                  id: reflectionData.id || `${Date.now()}`,
+                  storyId: reflectionData.storyId,
+                  childComfort: reflectionData.childComfort,
+                  parentConfidence: reflectionData.parentConfidence,
+                  observations: reflectionData.observations.trim(),
+                  successMoments: reflectionData.successMoments.trim(),
+                  createdAt: reflectionData.id
+                    ? reflections.find((r) => r.id === reflectionData.id)
+                        ?.createdAt || new Date().toISOString()
+                    : new Date().toISOString(),
+                  updatedAt: new Date().toISOString(),
+                };
+                const next = [...reflections];
+                const existingIdx = next.findIndex(
+                  (r) => r.id === reflection.id,
+                );
+                if (existingIdx >= 0) {
+                  next[existingIdx] = reflection;
+                } else {
+                  next.push(reflection);
+                }
+                setReflections(next);
+                saveReflectionsToStorage(next, currentUser?.uid);
+              }}
+              onDelete={(id) => {
+                const next = reflections.filter((r) => r.id !== id);
+                setReflections(next);
+                saveReflectionsToStorage(next, currentUser?.uid);
+              }}
+            />
+          }
+        />
       </PortalShell>
 
-      {showStoryBuilder && passports.length > 0 && (
-        <div className="storypal-builder fixed inset-0 z-50 flex items-center justify-center px-4 py-6">
-          <div
-            className="absolute inset-0 bg-black/40"
-            onClick={closeStoryBuilder}
-            aria-hidden="true"
-          />
-          <div ref={storyBuilderRef} role="dialog" aria-modal="true" aria-label={t("Story editor")} className="relative w-full max-w-6xl max-h-[90vh] overflow-hidden rounded-3xl bg-white/95 backdrop-blur border border-zinc-200 shadow-xl">
-            <div className="sticky top-0 z-10 flex items-center justify-between px-6 py-4 border-b border-zinc-200 bg-white/90 backdrop-blur">
-              <div>
-                <div className="text-xl font-semibold text-zinc-900">
-                  {editingModuleId ? t("Edit story") : t("Create story")}
-                </div>
-                <div className="text-sm text-zinc-600">{t("Build and preview stories, then save to your account.")}</div>
-              </div>
-              <button
-                type="button"
-                onClick={closeStoryBuilder}
-                disabled={savingModule}
-                data-telemetry="parent_story_builder_close"
-                className="rounded-xl px-4 py-2 bg-zinc-100 hover:bg-zinc-200 text-zinc-900 disabled:opacity-50"
-              >
-                {t("close")}
-              </button>
-            </div>
-            <div className="px-6 pb-6 overflow-y-auto max-h-[calc(90vh-80px)] relative">
-              {savingModule && (
-                <div
-                  className={`sticky top-0 z-10 mb-5 rounded-2xl border p-4 shadow-sm sm:p-5 ${guideFailure ? "border-amber-200 bg-amber-50" : "border-purple-200 bg-purple-50"}`}
-                >
-                  <div className="flex items-start gap-3 sm:gap-4">
-                    <div
-                      className={`flex size-10 shrink-0 items-center justify-center rounded-xl border bg-white ${guideFailure ? "border-amber-200 text-amber-700" : "border-purple-200 text-[#315e4a]"}`}
-                    >
-                      {guideFailure ? (
-                        <AlertTriangle className="size-5" aria-hidden="true" />
-                      ) : (
-                        <LoaderCircle
-                          className="size-5 motion-safe:animate-spin"
-                          aria-hidden="true"
-                        />
-                      )}
-                    </div>
-                    <div className="min-w-0 flex-1">
-                      {guideFailure ? (
-                        <>
-                          <div role="alert" className="space-y-1">
-                            <h3 className="text-sm font-semibold leading-6 text-amber-950">
-                              {guideFailure.timedOut
-                                ? t("Guide generation timed out.")
-                                : t("Some parent guides could not be generated.")}
-                            </h3>
-                            <p className="text-sm leading-6 text-amber-900">{t("Your edits and successful guides are retained.")}</p>
-                            <p className="flex flex-wrap items-center gap-2 pt-2 text-xs font-medium text-amber-900">
-                              <span>{t("Steps to retry:")}</span>
-                              {guideFailure.failedSteps.map((step) => (
-                                <span
-                                  key={step}
-                                  className="inline-flex min-w-7 items-center justify-center rounded-lg border border-amber-200 bg-white px-2 py-1 tabular-nums"
-                                >
-                                  {step}
-                                </span>
-                              ))}
-                            </p>
-                          </div>
-                          <div className="mt-4 flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:gap-3">
-                            <button
-                              type="button"
-                              onClick={() => handleGuideDecision(true)}
-                              className="inline-flex min-h-11 cursor-pointer items-center justify-center gap-2 rounded-xl bg-[#315e4a] px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition-colors duration-200 hover:bg-[#244a39] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-purple-700"
-                            >
-                              <Check className="size-4" aria-hidden="true" />{t("Save existing results")}</button>
-                            <button
-                              type="button"
-                              onClick={() => handleGuideDecision(false)}
-                              className="inline-flex min-h-11 cursor-pointer items-center justify-center gap-2 rounded-xl border border-amber-300 bg-white px-4 py-2.5 text-sm font-semibold text-amber-950 transition-colors duration-200 hover:border-amber-400 hover:bg-amber-100 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-amber-700"
-                            >
-                              <RotateCcw
-                                className="size-4"
-                                aria-hidden="true"
-                              />{t("Retry failed steps")}</button>
-                          </div>
-                        </>
-                      ) : (
-                        <>
-                          <div
-                            role="status"
-                            aria-atomic="true"
-                            className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1"
-                          >
-                            <h3 className="text-sm font-semibold leading-6 text-[#315e4a]">
-                              {guideProgress
-                                ? t("Processing parent guides")
-                                : t("Preparing parent guides…")}
-                            </h3>
-                            {guideProgress && (
-                              <span className="rounded-lg border border-purple-200 bg-white px-2.5 py-1 text-xs font-semibold tabular-nums text-[#315e4a]">
-                                {guideProgress.completed} /{" "}
-                                {guideProgress.total}
-                              </span>
-                            )}
-                          </div>
-                          {guideProgress && guideProgress.total > 0 && (
-                            <progress
-                              aria-label={t("Parent guide processing progress")}
-                              value={guideProgress.completed}
-                              max={guideProgress.total}
-                              className="mt-3 block h-2 w-full overflow-hidden rounded-full border-0 bg-purple-100 [&::-webkit-progress-bar]:rounded-full [&::-webkit-progress-bar]:bg-purple-100 [&::-webkit-progress-value]:rounded-full [&::-webkit-progress-value]:bg-[#315e4a] [&::-moz-progress-bar]:rounded-full [&::-moz-progress-bar]:bg-[#315e4a]"
-                            />
-                          )}
-                        </>
-                      )}
-                    </div>
-                  </div>
-                </div>
-              )}
-              <StoryModules
-                passports={passports}
-                onSave={handleModuleSave}
-                saving={savingModule}
-                onPreview={handleModulePreview}
-                initialData={
-                  editingModuleId
-                    ? modules.find((m) => m.id === editingModuleId)
-                    : storyDraft
-                }
-              />
-            </div>
-          </div>
-        </div>
-      )}
-
-      {showPreview && previewModule && (
+      {showTraining && (
         <StoryPlayer
-          moduleDefinition={previewModule}
-          templateContext={
-            previewModule.id === "parent-training" || !selectedPassport
-              ? {}
-              : buildContextFromPassport(selectedPassport)
-          }
-          onClose={() => {
-            setShowPreview(false);
-            setPreviewModule(null);
-          }}
-          onFinished={() => {
-            setShowPreview(false);
-            setPreviewModule(null);
-          }}
+          moduleDefinition={PARENT_TRAINING_MODULE}
+          onClose={() => setShowTraining(false)}
         />
       )}
     </>

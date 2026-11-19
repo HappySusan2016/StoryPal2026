@@ -10,7 +10,9 @@ export function isBuiltInStory(story) {
 /** Accept Firestore timestamps, cached timestamp objects, and ISO dates. */
 export function toMillis(value) {
   if (typeof value?.toMillis === "function") return value.toMillis();
-  if (typeof value?.seconds === "number") return value.seconds * 1000;
+  if (typeof value?.seconds === "number") {
+    return value.seconds * 1000 + (value.nanoseconds ?? 0) / 1e6;
+  }
   const time = typeof value === "number" ? value : Date.parse(value);
   return Number.isFinite(time) ? time : 0;
 }
@@ -34,8 +36,10 @@ export function detachProfileFromStories(stories, profileId) {
   );
 }
 
-/** Show only storybooks linked to valid profiles. Keep public examples and records with missing or invalid links in the source data. */
+/** Select storybooks linked to valid profiles and return them newest first without reordering the input. */
 export function getProfileStories(stories, passports) {
   const profileIds = new Set(passports.map(passport => passport.id));
-  return stories.filter(story => Boolean(story.childId) && profileIds.has(story.childId));
+  return stories
+    .filter(story => Boolean(story.childId) && profileIds.has(story.childId))
+    .sort((first, second) => toMillis(second.createdAt) - toMillis(first.createdAt));
 }

@@ -98,9 +98,17 @@ test("五种语言保留参考词典的每一个词条", async () => {
 
 /** @module Regression tests for per-child default storybooks and legacy profile fields */
 const defaultSource = await readFile(new URL("../app/lib/defaultModules.js", import.meta.url), "utf8");
-const { DEFAULT_MODULES, createDefaultModules, getMissingDefaultModules } = await import(`data:text/javascript;base64,${Buffer.from(defaultSource).toString("base64")}`);
+const { DEFAULT_MODULES, createDefaultModules, getDefaultStoryTemplate, getMissingDefaultModules } = await import(`data:text/javascript;base64,${Buffer.from(defaultSource).toString("base64")}`);
 const fieldSource = await readFile(new URL("../app/lib/passportFields.js", import.meta.url), "utf8");
-const { passportGroups, updatePassportFromForm } = await import(`data:text/javascript;base64,${Buffer.from(fieldSource).toString("base64")}`);
+const { hasDuplicateChildName, passportGroups, updatePassportFromForm } = await import(`data:text/javascript;base64,${Buffer.from(fieldSource).toString("base64")}`);
+
+test("新建和改名共用重名规则，旧档案保留原名可继续保存", () => {
+  const first = { id: "a", childName: "Alex" };
+  const second = { id: "b", childName: "Sunny" };
+  assert.equal(hasDuplicateChildName({ id: "new", childName: " alex " }, [first]), true);
+  assert.equal(hasDuplicateChildName({ ...second, childName: "ALEX" }, [first, second], second), true);
+  assert.equal(hasDuplicateChildName(second, [first, second], second), false);
+});
 
 test("新儿童各自获得三本原始绘本，重试 ID 稳定且内容互不影响", () => {
   const first = createDefaultModules("child-a", "2026-11-17T00:00:00Z");
@@ -113,6 +121,16 @@ test("新儿童各自获得三本原始绘本，重试 ID 稳定且内容互不�
   first[0].steps[0].message = "Edited";
   assert.notEqual(second[0].steps[0].message, "Edited");
   assert.notEqual(DEFAULT_MODULES[0].steps[0].message, "Edited");
+});
+
+test("不同孩子的默认绘本和旧版 ID 映射到同一模板，同名自建绘本独立", () => {
+  const [template] = DEFAULT_MODULES;
+  const [first] = createDefaultModules("child-a");
+  const [second] = createDefaultModules("child-b");
+  assert.equal(getDefaultStoryTemplate(first), template);
+  assert.equal(getDefaultStoryTemplate(second), template);
+  assert.equal(getDefaultStoryTemplate({ ...template, childId: "child-a" }), template);
+  assert.equal(getDefaultStoryTemplate({ ...first, id: "custom-story" }), undefined);
 });
 
 test("完整旧护照字段可以新增、更新和清空，头像与未知数据保留", () => {
@@ -180,6 +198,19 @@ test("公共与失效关联绘本不展示，原始数据保留且孩子之间�
   assert.equal(visible[0], stories[3]);
   assert.deepEqual(getProfileStories(stories, []), []);
   assert.deepEqual(getProfileStories(detachProfileFromStories(stories, "a"), passports).map(story => story.id), ["b-story"]);
+});
+
+test("按创建时间倒序展示绘本，兼容缓存时间戳且保留源数据顺序", () => {
+  const stories = [
+    { id: "old", childId: "a", createdAt: { seconds: 1 }, updatedAt: "2026-11-19" },
+    { id: "missing", childId: "a" },
+    { id: "new", childId: "a", createdAt: { seconds: 1, nanoseconds: 500_000_000 } },
+    { id: "same-time", childId: "a", createdAt: "1970-01-01T00:00:01.500Z" },
+  ];
+  assert.deepEqual(getProfileStories(stories, [{ id: "a" }]).map(story => story.id), [
+    "new", "same-time", "old", "missing",
+  ]);
+  assert.deepEqual(stories.map(story => story.id), ["old", "missing", "new", "same-time"]);
 });
 
 test("旧账号的每个已有孩子补齐三本独立默认绘本，公共示例不作为有效关联", () => {

@@ -1,6 +1,6 @@
 /* Store storybook reading sessions separately under the corresponding child profile. */
 
-import { arrayUnion, collection, doc, onSnapshot, setDoc } from "firebase/firestore";
+import { arrayUnion, collection, doc, onSnapshot, runTransaction, serverTimestamp, setDoc } from "firebase/firestore";
 import { db } from "./firebaseClient";
 
 /** Merge confirmed pages atomically so writing the same page twice does not increase the count. */
@@ -27,4 +27,25 @@ export function subscribeToReadingPageCounts(uid, onCounts, onError) {
     });
     onCounts(counts);
   }, onError);
+}
+
+
+/** Award stars once per storybook. A transaction protects the total against concurrent claims. */
+export function awardReadingStars(uid, childId, moduleId, stars) {
+  const rewardRef = doc(db, "users", uid, "childStars", childId);
+  return runTransaction(db, async (transaction) => {
+    const snapshot = await transaction.get(rewardRef);
+    const reward = snapshot.data();
+    const completedModules = reward?.completedModules || {};
+    if (Object.hasOwn(completedModules, moduleId)) return;
+
+    transaction.set(rewardRef, {
+      totalStars: (reward?.totalStars || 0) + stars,
+      completedModules: {
+        ...completedModules,
+        [moduleId]: { completedAt: serverTimestamp(), starsAwarded: stars },
+      },
+      lastUpdated: serverTimestamp(),
+    }, { merge: true });
+  });
 }

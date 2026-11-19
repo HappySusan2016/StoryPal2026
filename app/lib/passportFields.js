@@ -116,6 +116,14 @@ export const passportGroups = [
   ]
 ];
 
+/** Check for duplicate names on creation or rename. Existing profiles can keep their names when other fields change. */
+export function hasDuplicateChildName(passport, passports, existing) {
+  const nameKey = (name) => (name || "").trim().toLowerCase().normalize("NFC");
+  const name = nameKey(passport.childName);
+  if (existing && nameKey(existing.childName) === name) return false;
+  return passports.some(item => item.id !== passport.id && nameKey(item.childName) === name);
+}
+
 /** Merge the legacy form into an existing profile while preserving hidden fields and unrecognized communication methods. */
 export function updatePassportFromForm(existing, data, id) {
   const next = { ...existing, id: existing?.id || id, childName: data.get("childName").trim(), age: data.get("age").trim() };

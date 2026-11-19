@@ -19,8 +19,8 @@ export default function SiteHeader() {
     }
   };
 
-  // Portal pages use dedicated navigation while legacy feature pages keep their original navigation.
-  if (["/child", "/analytics", "/", "/settings", "/login", "/signup", "/terms", "/privacy", "/parent", "/parent/auth"].includes(pathname) || pathname?.startsWith("/profiles/")) return null;
+  /** @module Pages with navigation provided by PortalShell */
+  if (["/child", "/analytics", "/", "/settings", "/login", "/signup", "/terms", "/privacy", "/parent", "/parent/auth"].includes(pathname) || pathname?.startsWith("/profiles/") || pathname?.startsWith("/stories/")) return null;
 
   return (
     <header className="sticky top-0 z-40 w-full backdrop-blur supports-[backdrop-filter]:bg-white/60 bg-[#fbf7ef]/95 border-b border-[#e8e2cf]">

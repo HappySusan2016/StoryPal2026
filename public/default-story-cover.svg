@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="600" height="300" viewBox="0 0 600 300">
+  <!-- Reuse the prototype's clouds, grassy hills, and child wearing a backpack. -->
+  <path fill="#dce9dc" d="M0 0h600v300H0z"/>
+  <defs>
+    <g id="cloud" fill="#f7f6ea">
+      <rect width="94" height="30" rx="15"/>
+      <circle cx="40" cy="2" r="20"/>
+      <circle cx="63" cy="7" r="17"/>
+    </g>
+  </defs>
+  <use href="#cloud" x="84" y="70"/>
+  <use href="#cloud" transform="translate(438 114) scale(.7)"/>
+  <ellipse cx="315" cy="318" rx="375" ry="102" fill="#91b596" transform="rotate(-3 315 318)"/>
+  <path fill="#fff8de" d="M232 58q0 10 10 10-10 0-10 10 0-10-10-10 10 0 10-10z"/>
+  <path fill="none" stroke="#fff8de" stroke-width="1.5" d="M394 160q0 8 8 8-8 0-8 8 0-8-8-8 8 0 8-8z"/>
+  <g transform="translate(246 102) scale(2)">
+    <rect x="8" y="47" width="39" height="49" rx="14" fill="#e7a775"/>
+    <rect y="48" width="13" height="34" rx="7" fill="#d7835c"/>
+    <circle cx="27" cy="34" r="12" fill="#efc29a" stroke="#8b503b" stroke-width="1.5"/>
+    <path fill="#49382d" d="M10 29v-7c0-15 33-15 33 0 0 9-25 14-33 7z"/>
+    <path fill="none" stroke="#8b503b" stroke-width="1.5" stroke-linecap="round" d="M23 34h.1m8 0h.1m-8 4q4 4 8 0"/>
+  </g>
+</svg>

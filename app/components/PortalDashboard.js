@@ -2,13 +2,15 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { Trash2 } from "lucide-react";
 import { useTranslation } from "../hooks/useTranslation";
 import { toMillis } from "../lib/portalData";
+import { getDefaultStoryTemplate } from "../lib/defaultModules";
 import { subscribeToReadingPageCounts } from "../lib/readingSessions";
 
 import PassportFields from "./PassportFields";
-import { updatePassportFromForm } from "../lib/passportFields";
+import { hasDuplicateChildName, updatePassportFromForm } from "../lib/passportFields";
 
 /** @module Parent dashboard and child profile details */
 export default function PortalDashboard({
@@ -33,6 +35,7 @@ export default function PortalDashboard({
   const profileId = initialProfileId;
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [passportError, setPassportError] = useState("");
   const profile = passports.find((p) => p.id === profileId);
 
   /** @module Dashboard page counts aggregated across the current account's existing profiles */
@@ -55,14 +58,17 @@ export default function PortalDashboard({
     : "—";
 
   /** @module Profile and storybook actions */
-  async function handleAction(action) {
+  async function handleAction(action, reportError = setError) {
     setBusy(true);
     setError("");
+    if (reportError !== setError) reportError("");
     try {
       await action();
       return true;
-    } catch {
-      setError(t("Could not save changes. Please try again."));
+    } catch (error) {
+      reportError(error?.code === "duplicate-child-name"
+        ? "A child profile with this name already exists."
+        : "Could not save changes. Please try again.");
       return false;
     } finally {
       setBusy(false);
@@ -72,15 +78,45 @@ export default function PortalDashboard({
     event.preventDefault();
     const data = new FormData(event.currentTarget);
     const next = updatePassportFromForm(existing, data, crypto.randomUUID());
+    // Check the loaded profile list first so the form can flag duplicate names immediately.
+    if (hasDuplicateChildName(next, passports, existing)) {
+      setPassportError("A child profile with this name already exists.");
+      return;
+    }
     return handleAction(async () => {
       await onSavePassport(next);
       // Open the full profile page after the new profile and default storybooks are saved.
       if (!existing) router.push(`/profiles/${next.id}`);
-    });
+    }, setPassportError);
   }
   function renderDetails(existing) {
-    return <PassportFields passport={existing} basicOnly={!existing} />;
+    return (
+      <>
+        <PassportFields passport={existing} basicOnly={!existing} />
+        {passportError && <p className="notice error" role="alert">{t(passportError)}</p>}
+      </>
+    );
   }
+
+  /** @module Storybook deletion confirmation */
+  const deleteDialogRef = useRef(null);
+  const cancelDeleteRef = useRef(null);
+  const [storyToDelete, setStoryToDelete] = useState(null);
+
+  function handleOpenDeleteDialog(story) {
+    setError("");
+    setStoryToDelete(story);
+    deleteDialogRef.current.showModal();
+    cancelDeleteRef.current.focus();
+  }
+
+  async function handleConfirmDelete() {
+    if (!storyToDelete || busy) return;
+    const deleted = await handleAction(() => onDeleteStory(storyToDelete.id));
+    if (deleted) deleteDialogRef.current?.close();
+  }
+
+  /** @module Storybook list */
   function renderStories(stories, profileList = false) {
     return stories.length ? (
       <ul className="story-list">
@@ -99,15 +135,16 @@ export default function PortalDashboard({
             </div>
             <div className="story-actions">
                 <button className="secondary" type="button" onClick={() => onRead(story)}>{t("Read")}</button>
+              {/* The home workshop only opens built-in storybooks for reading. */}
+              {(profileList || !getDefaultStoryTemplate(story)) && <>
                 <button className="secondary" type="button" onClick={() => onEdit(story)}>{t("Edit")}</button>
                 <button
                   className="secondary danger"
                   type="button"
                   disabled={busy}
-                  onClick={() => {
-                    if (window.confirm(t("Delete this story?"))) handleAction(() => onDeleteStory(story.id));
-                  }}
+                  onClick={() => handleOpenDeleteDialog(story)}
                 >{t("Delete")}</button>
+              </>}
             </div>
           </li>
         ))}
@@ -143,11 +180,52 @@ export default function PortalDashboard({
           {t(loadError)}
         </p>
       )}
-      {error && (
+      {error && !storyToDelete && (
         <p role="alert" className="notice">
-          {error}
+          {t(error)}
         </p>
       )}
+      <dialog
+        ref={deleteDialogRef}
+        className="story-delete-dialog"
+        aria-labelledby="story-delete-title"
+        aria-describedby="story-delete-description"
+        aria-busy={busy}
+        onCancel={(event) => {
+          if (busy) event.preventDefault();
+        }}
+        onClose={() => {
+          setError("");
+          setStoryToDelete(null);
+        }}
+      >
+        <span className="story-delete-icon" aria-hidden="true">
+          <Trash2 size={22} />
+        </span>
+        <h2 id="story-delete-title">{t("Delete this story?")}</h2>
+        <p className="story-delete-name">{storyToDelete?.title}</p>
+        <p id="story-delete-description">{t("Delete this story permanently.")}</p>
+        {error && storyToDelete && <p role="alert" className="notice error">{t(error)}</p>}
+        <div className="story-delete-actions">
+          <button
+            ref={cancelDeleteRef}
+            className="secondary"
+            type="button"
+            disabled={busy}
+            onClick={() => deleteDialogRef.current.close()}
+          >
+            {t("Cancel")}
+          </button>
+          <button
+            className="story-delete-confirm"
+            type="button"
+            disabled={busy}
+            onClick={handleConfirmDelete}
+          >
+            {t("Delete")}
+          </button>
+        </div>
+      </dialog>
       {profile ? (
         <>
           <Link className="back profile-back" href="/">
@@ -180,7 +258,7 @@ export default function PortalDashboard({
           <section className="card">
             <div className="section-label">{t("COMMUNICATION PASSPORT")}</div>
             <h2>{t("Update details")}</h2>
-            <form className="profile-details-form passport-fields" key={profile.id} onSubmit={e => handleSave(e, profile)}>
+            <form className="profile-details-form passport-fields" key={profile.id} onSubmit={e => handleSave(e, profile)} onInput={() => setPassportError("")}>
               {renderDetails(profile)}
               <button className="primary" disabled={busy || loading}>{t("Save changes")}</button>
             </form>
@@ -293,6 +371,7 @@ export default function PortalDashboard({
                 )}
               </p>
               <form
+                onInput={() => setPassportError("")}
                 onSubmit={async (e) => {
                   await handleSave(e);
                 }}

@@ -1,8 +1,9 @@
 "use client";
 
-import { useState, useMemo, useEffect, useRef } from "react";
+import { useState, useEffect, useRef } from "react";
 import { auth } from "../lib/firebaseClient";
-import { Sparkles } from "lucide-react";
+import { ArrowDown, ArrowUp, ChevronDown, Sparkles, X } from "lucide-react";
+import StoryPlayer from "./StoryPlayer";
 import { useTranslation } from "../hooks/useTranslation";
 
 function createEmptyStep(stepType) {
@@ -70,7 +71,7 @@ function VariableSelector({ onInsert }) {
       <button
         type="button"
         onClick={() => setIsOpen(!isOpen)}
-        className="rounded-lg px-3 py-1.5 bg-blue-50 hover:bg-blue-100 text-blue-700 text-sm font-medium border border-blue-200 flex items-center gap-1"
+        className="story-editor-button"
       >
         <svg
           xmlns="http://www.w3.org/2000/svg"
@@ -92,7 +93,7 @@ function VariableSelector({ onInsert }) {
                 key={variable.value}
                 type="button"
                 onClick={() => handleSelect(variable.value)}
-                className="w-full text-left px-4 py-2 hover:bg-blue-50 text-sm text-zinc-700"
+                className="story-editor-menu-option"
               >
                 <div className="font-medium">{t(variable.label)}</div>
                 <div className="text-xs text-zinc-500">{variable.value}</div>
@@ -140,7 +141,7 @@ function validateModule(moduleDef) {
 export default function StoryModules({
   passports,
   onSave,
-  onPreview,
+  getTemplateContext,
   initialData,
   saving = false,
 }) {
@@ -161,11 +162,9 @@ export default function StoryModules({
     initialStepsRef.current = ensureStepIds(initialData?.steps || []);
   }
   const [steps, setSteps] = useState(initialStepsRef.current);
-  const [editingId, setEditingId] = useState(initialData?.id || null);
+  const editingId = initialData?.id || null;
   const [activeStage, setActiveStage] = useState(1);
-  const [sceneFont, setSceneFont] = useState(
-    initialData?.fontPreset || "classic"
-  );
+  const sceneFont = initialData?.fontPreset || "classic";
   const [stageFraming, setStageFraming] = useState(
     initialData?.stageDesign?.framing || {
       focus: "greeting",
@@ -195,77 +194,6 @@ export default function StoryModules({
       badge: "bravery",
     }
   );
-
-  // Update form when initialData changes (for editing)
-  useEffect(() => {
-    if (initialData) {
-      setTitle(initialData.title || "");
-      setCoverImage(initialData.coverImage || "");
-      setSelectedPassportId(initialData.childId || "");
-      const initialSteps = ensureStepIds(initialData.steps || []);
-      initialStepsRef.current = initialSteps;
-      setSteps(initialSteps);
-      setEditingId(initialData.id || null);
-      setSceneFont(initialData.fontPreset || "classic");
-      setStageFraming(
-        initialData.stageDesign?.framing || {
-          focus: "greeting",
-          scenario: "school",
-          tone: "brave",
-          parentGoal: "",
-        }
-      );
-      setStageImmersion(
-        initialData.stageDesign?.immersion || {
-          feeling: "shy",
-          coplay: "wave",
-          imagery: "",
-        }
-      );
-      setStageReflection(
-        initialData.stageDesign?.reflection || {
-          tried: "",
-          confidence: "Medium",
-          comfort: "Medium",
-        }
-      );
-      setStageContinuity(
-        initialData.stageDesign?.continuity || {
-          nextArc: "school-arc",
-          cadence: "Every 2 days",
-          badge: "bravery",
-        }
-      );
-    } else {
-      // Clear form when initialData is null
-      setTitle("");
-      setCoverImage("");
-      setSteps([]);
-      setEditingId(null);
-      setSceneFont("classic");
-      setStageFraming({
-        focus: "greeting",
-        scenario: "school",
-        tone: "brave",
-        parentGoal: "",
-      });
-      setStageImmersion({
-        feeling: "shy",
-        coplay: "wave",
-        imagery: "",
-      });
-      setStageReflection({
-        tried: "",
-        confidence: "Medium",
-        comfort: "Medium",
-      });
-      setStageContinuity({
-        nextArc: "school-arc",
-        cadence: "Every 2 days",
-        badge: "bravery",
-      });
-    }
-  }, [initialData]);
 
   function buildStageContext() {
     return {
@@ -334,13 +262,9 @@ export default function StoryModules({
         data?.step && typeof data.step === "object" ? data.step : null;
       if (!incomingStep) throw new Error("No step returned.");
 
-      // Optionally adopt the suggested title if user hasn't set one
-      if (
-        !title.trim() &&
-        typeof data?.title === "string" &&
-        data.title.trim()
-      ) {
-        setTitle(data.title.trim());
+      // The title remains editable during generation. Use the AI suggestion only if the current title is empty.
+      if (typeof data?.title === "string" && data.title.trim()) {
+        setTitle((currentTitle) => currentTitle.trim() ? currentTitle : data.title.trim());
       }
 
       setSteps((prev) => {
@@ -491,24 +415,24 @@ export default function StoryModules({
     );
   }
 
-  const modulePreview = useMemo(
-    () => ({
-      id: editingId || "preview",
-      title: title || "Untitled Story",
-      coverImage,
-      steps,
-      fontPreset: sceneFont || "classic",
-    }),
-    [editingId, title, coverImage, steps, sceneFont]
-  );
-
-  const isValid = validateModule(modulePreview);
+  /** @module Draft editing and live preview */
+  // If a new storybook has no cover, use the prototype's default illustration for both preview and saving.
+  const resolvedCoverImage = coverImage.trim() || (editingId ? "" : "/default-story-cover.svg");
+  const previewStory = {
+    id: editingId || "preview",
+    title: title.trim() || t("Untitled Story"),
+    coverImage: resolvedCoverImage,
+    steps,
+    fontPreset: sceneFont,
+  };
+  const selectedPassport = passports.find((passport) => passport.id === selectedPassportId);
+  const isValid = validateModule({ title, steps });
 
   const handleSave = () => {
     const moduleDefinition = {
       id: editingId || `${Date.now()}`,
       title: title.trim(),
-      coverImage: coverImage.trim(),
+      coverImage: resolvedCoverImage,
       steps,
       childId: selectedPassportId || null,
       stageDesign: {
@@ -523,819 +447,814 @@ export default function StoryModules({
     onSave(moduleDefinition, initialStepsRef.current);
   };
 
-  const handlePreview = () => {
-    onPreview(modulePreview);
-  };
-
+  /** @module Preview above the editor */
   return (
-    <section className="mt-12" aria-busy={saving}>
-      <fieldset disabled={saving} inert={saving} className="min-w-0">
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <div className="rounded-2xl bg-white/80 backdrop-blur p-5 shadow-sm">
-          <div className="space-y-4">
-            <div>
-              <label htmlFor="title" className="block text-sm text-zinc-700">
-                {t("title")}
-              </label>
+    <>
+      <section aria-labelledby="story-preview-heading">
+        <h2 id="story-preview-heading" className="mb-3 text-lg font-semibold">{t("Preview")}</h2>
+        <StoryPlayer
+          layout="preview"
+          moduleDefinition={previewStory}
+          templateContext={getTemplateContext(selectedPassport)}
+        />
+      </section>
+
+      <section className="story-editor-card mt-7" aria-busy={saving}>
+        <fieldset disabled={saving} inert={saving} className="min-w-0 space-y-4">
+          <h2 className="text-lg font-semibold">{t("Story editor")}</h2>
+          <div>
+            <label htmlFor="title" className="block text-sm text-zinc-700">
+              {t("title")}
+            </label>
+            <input
+              id="title"
+              value={title}
+              onChange={(e) => setTitle(e.target.value)}
+              placeholder={t("e.g., Calm Breathing Mission")}
+              className="mt-1 w-full bg-white/90 border border-zinc-200 rounded-xl px-4 py-2 text-zinc-900 placeholder-zinc-400 focus:outline-none focus:ring-2 focus:ring-rose-300/50 focus:border-rose-300 transition-all"
+            />
+          </div>
+          <div>
+            <label htmlFor="cover" className="block text-sm text-zinc-700">{t("Cover Image (optional)")}</label>
+            <div className="mt-1 flex flex-wrap gap-2">
               <input
-                id="title"
-                value={title}
-                onChange={(e) => setTitle(e.target.value)}
-                placeholder={t("e.g., Calm Breathing Mission")}
-                className="mt-1 w-full bg-white/90 border border-zinc-200 rounded-xl px-4 py-2 text-zinc-900 placeholder-zinc-400 focus:outline-none focus:ring-2 focus:ring-rose-300/50 focus:border-rose-300 transition-all"
+                id="cover"
+                aria-describedby="cover-size-hint"
+                value={coverImage}
+                onChange={(e) => setCoverImage(e.target.value)}
+                placeholder={t("Paste an image link here (optional)")}
+                className="min-w-0 flex-1 bg-white/90 border border-zinc-200 rounded-xl px-4 py-2 text-zinc-900 placeholder-zinc-400 focus:outline-none focus:ring-2 focus:ring-rose-300/50 focus:border-rose-300 transition-all"
               />
-            </div>
-            <div>
-              <label htmlFor="cover" className="block text-sm text-zinc-700">{t("Cover Image (optional)")}</label>
-              <div className="mt-1 flex gap-2">
-                <input
-                  id="cover"
-                  value={coverImage}
-                  onChange={(e) => setCoverImage(e.target.value)}
-                  placeholder={t("Paste an image link here (optional)")}
-                  className="flex-1 bg-white/90 border border-zinc-200 rounded-xl px-4 py-2 text-zinc-900 placeholder-zinc-400 focus:outline-none focus:ring-2 focus:ring-rose-300/50 focus:border-rose-300 transition-all"
-                />
-                <label className="rounded-xl px-4 py-2 bg-blue-50 hover:bg-blue-100 text-blue-700 text-sm font-medium border border-blue-200 cursor-pointer transition-colors flex items-center gap-1">
-                  <svg
-                    xmlns="http://www.w3.org/2000/svg"
-                    className="w-4 h-4"
-                    viewBox="0 0 20 20"
-                    fill="currentColor"
-                  >
-                    <path
-                      fillRule="evenodd"
-                      d="M4 3a2 2 0 00-2 2v10a2 2 0 002 2h12a2 2 0 002-2V5a2 2 0 00-2-2H4zm12 12H4l4-8 3 6 2-4 3 6z"
-                      clipRule="evenodd"
-                    />
-                  </svg>{t("Upload Image")}<input
-                    type="file"
-                    accept="image/*"
-                    className="hidden"
-                    onChange={async (e) => {
-                      const file = e.target.files?.[0];
-                      if (file) {
-                        try {
-                          const dataURL = await fileToDataURL(file);
-                          setCoverImage(dataURL);
-                        } catch (error) {
-                          console.error("Error uploading image:", error);
-                          alert(t("Failed to upload image. Please try again."));
-                        }
+              <label className="story-editor-button">
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  className="w-4 h-4"
+                  viewBox="0 0 20 20"
+                  fill="currentColor"
+                >
+                  <path
+                    fillRule="evenodd"
+                    d="M4 3a2 2 0 00-2 2v10a2 2 0 002 2h12a2 2 0 002-2V5a2 2 0 00-2-2H4zm12 12H4l4-8 3 6 2-4 3 6z"
+                    clipRule="evenodd"
+                  />
+                </svg>{t("Upload Image")}<input
+                  type="file"
+                  accept="image/*"
+                  className="sr-only"
+                  aria-describedby="cover-size-hint"
+                  onChange={async (e) => {
+                    const file = e.target.files?.[0];
+                    if (file) {
+                      try {
+                        const dataURL = await fileToDataURL(file);
+                        setCoverImage(dataURL);
+                      } catch (error) {
+                        console.error("Error uploading image:", error);
+                        alert(t("Failed to upload image. Please try again."));
                       }
-                      e.target.value = ""; // Reset input
-                    }}
-                  />
-                </label>
-              </div>
-              {coverImage && (
-                <div className="mt-2 relative w-full max-w-xs aspect-4/3 rounded-lg overflow-hidden border border-zinc-200">
-                  <img
-                    src={coverImage}
-                    alt={t("Cover preview")}
-                    className="w-full h-full object-cover"
-                  />
+                    }
+                    e.target.value = ""; // Reset input
+                  }}
+                />
+              </label>
+            </div>
+            <p id="cover-size-hint" className="mt-1 text-xs text-zinc-600">
+              {t("Recommended cover size: 1500 × 1000 px (3:2).")}
+            </p>
+          </div>
+
+          <div>
+            <label
+              htmlFor="passport-select"
+              className="block text-sm text-zinc-700"
+            >{t("For Child (Passport)")}</label>
+            <select
+              id="passport-select"
+              value={selectedPassportId}
+              onChange={(e) => setSelectedPassportId(e.target.value)}
+              className="mt-1 w-full bg-white/90 border border-zinc-200 rounded-xl px-4 py-2 text-zinc-900 focus:outline-none focus:ring-2 focus:ring-rose-300/50 focus:border-rose-300 transition-all"
+            >
+              <option value="">{t("All Children / General")}</option>
+              {passports?.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.childName}
+                </option>
+              ))}
+            </select>
+            <p className="mt-1 text-xs text-zinc-500">{t("Select which child this story is for. Leave as \"All Children\" for stories that work for everyone.")}</p>
+          </div>
+
+          <h3 className="border-t border-[#e3e9df] pt-4 text-base font-semibold">{t("Edit the words on each page")}</h3>
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-sm text-zinc-700">{t("Add scene:")}</span>
+            <button
+              type="button"
+              onClick={() => addStep("doctor")}
+              className="story-editor-button"
+            >{t("Message")}</button>
+            <button
+              type="button"
+              onClick={() => addStep("user-input")}
+              className="story-editor-button"
+            >{t("Child's input")}</button>
+            <button
+              type="button"
+              onClick={() => addStep("choice")}
+              className="story-editor-button"
+            >{t("Multiple choice")}</button>
+          </div>
+
+          <ol className="space-y-4">
+            {steps.map((step, idx) => (
+              <li
+                key={step.id || `step-${idx}-${step.type}`}
+                className="rounded-xl border border-zinc-200 p-4 bg-white"
+              >
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div className="text-sm text-zinc-600">
+                    {t(getStepTypeLabel(step.type))}
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => moveStep(step.id, "up")}
+                      aria-label={t("Move up")}
+                      disabled={idx === 0}
+                      className="story-editor-button is-icon"
+                    >
+                      <ArrowUp className="size-4" aria-hidden="true" />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => moveStep(step.id, "down")}
+                      aria-label={t("Move down")}
+                      disabled={idx === steps.length - 1}
+                      className="story-editor-button is-icon"
+                    >
+                      <ArrowDown className="size-4" aria-hidden="true" />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => deleteStep(step.id)}
+                      className="story-editor-button is-danger"
+                    >{t("Delete")}</button>
+                  </div>
+                </div>
+
+                {step.type === "doctor" && (
+                  <div className="mt-3 space-y-3">
+                    <div>
+                      <div className="mb-1 flex flex-wrap items-center justify-between gap-2">
+                        <label className="block text-sm text-zinc-700">{t("Message")}</label>
+                        <VariableSelector
+                          onInsert={(variable) =>
+                            insertVariableAtCursor(
+                              step.id,
+                              "message",
+                              variable
+                            )
+                          }
+                        />
+                      </div>
+                      <textarea
+                        ref={(el) => {
+                          textareaRefs.current[`${step.id}-message`] = el;
+                        }}
+                        value={step.message}
+                        onChange={(e) =>
+                          updateStep(step.id, "message", e.target.value)
+                        }
+                        rows={3}
+                        placeholder={t("Write the message...")}
+                        className="mt-1 w-full bg-white/90 border border-zinc-200 rounded-xl px-4 py-2 text-zinc-900 placeholder-zinc-400 focus:outline-none focus:ring-2 focus:ring-rose-300/50 focus:border-rose-300 transition-all"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm text-zinc-700">{t("Image (optional)")}</label>
+                      <div className="mt-1 flex flex-wrap gap-2">
+                        <input
+                          value={step.imageUrl || ""}
+                          onChange={(e) =>
+                            updateStep(step.id, "imageUrl", e.target.value)
+                          }
+                          placeholder={t("Paste an image link here (optional)")}
+                          className="min-w-0 flex-1 bg-white/90 border border-zinc-200 rounded-xl px-4 py-2 text-zinc-900 placeholder-zinc-400 focus:outline-none focus:ring-2 focus:ring-rose-300/50 focus:border-rose-300 transition-all"
+                        />
+                        <label className="story-editor-button whitespace-nowrap">
+                          <svg
+                            xmlns="http://www.w3.org/2000/svg"
+                            className="w-4 h-4"
+                            viewBox="0 0 20 20"
+                            fill="currentColor"
+                          >
+                            <path
+                              fillRule="evenodd"
+                              d="M4 3a2 2 0 00-2 2v10a2 2 0 002 2h12a2 2 0 002-2V5a2 2 0 00-2-2H4zm12 12H4l4-8 3 6 2-4 3 6z"
+                              clipRule="evenodd"
+                            />
+                          </svg>{t("Upload")}<input
+                            type="file"
+                            accept="image/*"
+                            className="sr-only"
+                            onChange={async (e) => {
+                              const file = e.target.files?.[0];
+                              if (file) {
+                                try {
+                                  const dataURL = await fileToDataURL(file);
+                                  updateStep(step.id, "imageUrl", dataURL);
+                                } catch (error) {
+                                  console.error(
+                                    "Error uploading image:",
+                                    error
+                                  );
+                                  alert(
+                                    "Failed to upload image. Please try again."
+                                  );
+                                }
+                              }
+                              e.target.value = ""; // Reset input
+                            }}
+                          />
+                        </label>
+                      </div>
+                      {step.imageUrl && (
+                        <div className="mt-2 relative w-full max-w-xs aspect-4/3 rounded-lg overflow-hidden border border-zinc-200">
+                          <img
+                            src={step.imageUrl}
+                            alt={t("Step preview")}
+                            className="w-full h-full object-cover"
+                          />
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                {step.type === "user-input" && (
+                  <div className="mt-3 space-y-3">
+                    <div>
+                      <div className="mb-1 flex flex-wrap items-center justify-between gap-2">
+                        <label className="block text-sm text-zinc-700">{t("Prompt")}</label>
+                        <VariableSelector
+                          onInsert={(variable) =>
+                            insertVariableAtCursor(
+                              step.id,
+                              "message",
+                              variable
+                            )
+                          }
+                        />
+                      </div>
+                      <textarea
+                        ref={(el) => {
+                          textareaRefs.current[`${step.id}-message`] = el;
+                        }}
+                        value={step.message}
+                        onChange={(e) =>
+                          updateStep(step.id, "message", e.target.value)
+                        }
+                        rows={2}
+                        placeholder={t("Ask the child a question...")}
+                        className="mt-1 w-full bg-white/90 border border-zinc-200 rounded-xl px-4 py-2 text-zinc-900 placeholder-zinc-400 focus:outline-none focus:ring-2 focus:ring-rose-300/50 focus:border-rose-300 transition-all"
+                      />
+                    </div>
+                    <div>
+                      <div className="mb-1 flex flex-wrap items-center justify-between gap-2">
+                        <label className="block text-sm text-zinc-700">{t("Placeholder")}</label>
+                        <VariableSelector
+                          onInsert={(variable) =>
+                            insertVariableAtCursor(
+                              step.id,
+                              "placeholder",
+                              variable
+                            )
+                          }
+                        />
+                      </div>
+                      <input
+                        ref={(el) => {
+                          textareaRefs.current[`${step.id}-placeholder`] = el;
+                        }}
+                        value={step.placeholder || ""}
+                        onChange={(e) =>
+                          updateStep(step.id, "placeholder", e.target.value)
+                        }
+                        placeholder={t("Enter the child's response...")}
+                        className="mt-1 w-full bg-white/90 border border-zinc-200 rounded-xl px-4 py-2 text-zinc-900 placeholder-zinc-400 focus:outline-none focus:ring-2 focus:ring-rose-300/50 focus:border-rose-300 transition-all"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm text-zinc-700">{t("Image (optional)")}</label>
+                      <div className="mt-1 flex flex-wrap gap-2">
+                        <input
+                          value={step.imageUrl || ""}
+                          onChange={(e) =>
+                            updateStep(step.id, "imageUrl", e.target.value)
+                          }
+                          placeholder={t("Paste an image link here (optional)")}
+                          className="min-w-0 flex-1 bg-white/90 border border-zinc-200 rounded-xl px-4 py-2 text-zinc-900 placeholder-zinc-400 focus:outline-none focus:ring-2 focus:ring-rose-300/50 focus:border-rose-300 transition-all"
+                        />
+                        <label className="story-editor-button whitespace-nowrap">
+                          <svg
+                            xmlns="http://www.w3.org/2000/svg"
+                            className="w-4 h-4"
+                            viewBox="0 0 20 20"
+                            fill="currentColor"
+                          >
+                            <path
+                              fillRule="evenodd"
+                              d="M4 3a2 2 0 00-2 2v10a2 2 0 002 2h12a2 2 0 002-2V5a2 2 0 00-2-2H4zm12 12H4l4-8 3 6 2-4 3 6z"
+                              clipRule="evenodd"
+                            />
+                          </svg>{t("Upload")}<input
+                            type="file"
+                            accept="image/*"
+                            className="sr-only"
+                            onChange={async (e) => {
+                              const file = e.target.files?.[0];
+                              if (file) {
+                                try {
+                                  const dataURL = await fileToDataURL(file);
+                                  updateStep(step.id, "imageUrl", dataURL);
+                                } catch (error) {
+                                  console.error(
+                                    "Error uploading image:",
+                                    error
+                                  );
+                                  alert(
+                                    "Failed to upload image. Please try again."
+                                  );
+                                }
+                              }
+                              e.target.value = ""; // Reset input
+                            }}
+                          />
+                        </label>
+                      </div>
+                      {step.imageUrl && (
+                        <div className="mt-2 relative w-full max-w-xs aspect-4/3 rounded-lg overflow-hidden border border-zinc-200">
+                          <img
+                            src={step.imageUrl}
+                            alt={t("Step preview")}
+                            className="w-full h-full object-cover"
+                          />
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                {step.type === "choice" && (
+                  <div className="mt-3 space-y-3">
+                    <div>
+                      <div className="mb-1 flex flex-wrap items-center justify-between gap-2">
+                        <label className="block text-sm text-zinc-700">{t("Question")}</label>
+                        <VariableSelector
+                          onInsert={(variable) =>
+                            insertVariableAtCursor(
+                              step.id,
+                              "message",
+                              variable
+                            )
+                          }
+                        />
+                      </div>
+                      <textarea
+                        ref={(el) => {
+                          textareaRefs.current[`${step.id}-message`] = el;
+                        }}
+                        value={step.message}
+                        onChange={(e) =>
+                          updateStep(step.id, "message", e.target.value)
+                        }
+                        rows={2}
+                        placeholder={t("Ask the child to choose...")}
+                        className="mt-1 w-full bg-white/90 border border-zinc-200 rounded-xl px-4 py-2 text-zinc-900 placeholder-zinc-400 focus:outline-none focus:ring-2 focus:ring-rose-300/50 focus:border-rose-300 transition-all"
+                      />
+                    </div>
+                    <div>
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <label className="block text-sm text-zinc-700">{t("Options")}</label>
+                        <button
+                          type="button"
+                          onClick={() => addChoiceOption(step.id)}
+                          className="story-editor-button"
+                        >{t("Add option")}</button>
+                      </div>
+                      <div className="mt-2 space-y-2">
+                        {(step.options || []).map((opt, i) => (
+                          <div key={i} className="flex items-center gap-2">
+                            <input
+                              value={opt}
+                              onChange={(e) =>
+                                updateChoiceOption(step.id, i, e.target.value)
+                              }
+                              placeholder={`Choice ${i + 1}`}
+                              className="min-w-0 flex-1 bg-white/90 border border-zinc-200 rounded-xl px-4 py-2 text-zinc-900 placeholder-zinc-400 focus:outline-none focus:ring-2 focus:ring-rose-300/50 focus:border-rose-300 transition-all"
+                            />
+                            <button
+                              type="button"
+                              onClick={() => removeChoiceOption(step.id, i)}
+                              className="story-editor-button is-danger is-icon"
+                              aria-label={t("Remove option")}
+                            >
+                              <X className="size-4" aria-hidden="true" />
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                    <div>
+                      <label className="block text-sm text-zinc-700">{t("Image (optional)")}</label>
+                      <div className="mt-1 flex flex-wrap gap-2">
+                        <input
+                          value={step.imageUrl || ""}
+                          onChange={(e) =>
+                            updateStep(step.id, "imageUrl", e.target.value)
+                          }
+                          placeholder={t("Paste an image link here (optional)")}
+                          className="min-w-0 flex-1 bg-white/90 border border-zinc-200 rounded-xl px-4 py-2 text-zinc-900 placeholder-zinc-400 focus:outline-none focus:ring-2 focus:ring-rose-300/50 focus:border-rose-300 transition-all"
+                        />
+                        <label className="story-editor-button whitespace-nowrap">
+                          <svg
+                            xmlns="http://www.w3.org/2000/svg"
+                            className="w-4 h-4"
+                            viewBox="0 0 20 20"
+                            fill="currentColor"
+                          >
+                            <path
+                              fillRule="evenodd"
+                              d="M4 3a2 2 0 00-2 2v10a2 2 0 002 2h12a2 2 0 002-2V5a2 2 0 00-2-2H4zm12 12H4l4-8 3 6 2-4 3 6z"
+                              clipRule="evenodd"
+                            />
+                          </svg>{t("Upload")}<input
+                            type="file"
+                            accept="image/*"
+                            className="sr-only"
+                            onChange={async (e) => {
+                              const file = e.target.files?.[0];
+                              if (file) {
+                                try {
+                                  const dataURL = await fileToDataURL(file);
+                                  updateStep(step.id, "imageUrl", dataURL);
+                                } catch (error) {
+                                  console.error(
+                                    "Error uploading image:",
+                                    error
+                                  );
+                                  alert(
+                                    "Failed to upload image. Please try again."
+                                  );
+                                }
+                              }
+                              e.target.value = ""; // Reset input
+                            }}
+                          />
+                        </label>
+                      </div>
+                      {step.imageUrl && (
+                        <div className="mt-2 relative w-full max-w-xs aspect-4/3 rounded-lg overflow-hidden border border-zinc-200">
+                          <img
+                            src={step.imageUrl}
+                            alt={t("Step preview")}
+                            className="w-full h-full object-cover"
+                          />
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+              </li>
+            ))}
+          </ol>
+
+          <div className="flex items-center gap-3 pt-2">
+            <button
+              type="button"
+              onClick={handleSave}
+              disabled={!isValid || aiGenerating || saving}
+              data-telemetry={
+                editingId ? "parent_story_update" : "parent_story_save"
+              }
+              className="story-editor-button is-primary"
+            >
+              {editingId ? t("Update story") : t("Save story")}
+            </button>
+          </div>
+
+          {/* AI settings sit at the bottom of the editor. Generated steps are appended to the list. */}
+          <details open className="story-editor-ai group">
+            <summary className="story-editor-ai-toggle flex cursor-pointer list-none items-center gap-2 rounded-xl font-semibold [&::-webkit-details-marker]:hidden">
+              <Sparkles className="size-4 shrink-0" aria-hidden="true" />
+              {t("AI step generator")}
+              <ChevronDown className="ml-auto size-4 group-open:rotate-180" aria-hidden="true" />
+            </summary>
+            <div className="mt-4 flex flex-wrap gap-2">
+              {[
+                { n: 1, label: "1. Framing" },
+                { n: 2, label: "2. Immersion" },
+                { n: 3, label: "3. Reflection" },
+                { n: 4, label: "4. Continuity" },
+              ].map((tab) => (
+                <button
+                  key={tab.n}
+                  type="button"
+                  onClick={() => setActiveStage(tab.n)}
+                  aria-pressed={activeStage === tab.n}
+                  className="story-editor-button is-pill"
+                >
+                  {tab.label}
+                </button>
+              ))}
+            </div>
+
+            <div className="mt-4">
+              {activeStage === 1 && (
+                <div className="rounded-xl border border-zinc-200 p-4 bg-white space-y-4">
+                  <h3 className="text-lg font-semibold text-zinc-900">{t("Stage 1 · Narrative Framing")}</h3>
+                  <p className="text-sm text-zinc-600">{t("Personalize the setup and align with today's goal.")}</p>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-sm text-zinc-700">{t("Today's focus")}</label>
+                      <select
+                        value={stageFraming.focus}
+                        onChange={(e) =>
+                          setStageFraming({
+                            ...stageFraming,
+                            focus: e.target.value,
+                          })
+                        }
+                        className="mt-1 w-full bg-white/90 border border-zinc-200 rounded-xl px-4 py-2"
+                      >
+                        <option value="greeting">{t("Greeting / Saying hello")}</option>
+                        <option value="sharing">{t("Sharing / Turn‑taking")}</option>
+                        <option value="routine">{t("Morning routine")}</option>
+                        <option value="transitions">{t("Transitions: between activities")}</option>
+                        <option value="sensory">{t("Managing sensory surprises")}</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-sm text-zinc-700">{t("Scenario")}</label>
+                      <select
+                        value={stageFraming.scenario}
+                        onChange={(e) =>
+                          setStageFraming({
+                            ...stageFraming,
+                            scenario: e.target.value,
+                          })
+                        }
+                        className="mt-1 w-full bg-white/90 border border-zinc-200 rounded-xl px-4 py-2"
+                      >
+                        <option value="school">{t("School: arrival and wave")}</option>
+                        <option value="playdate">{t("Playdate: meet a new friend")}</option>
+                        <option value="store">{t("Grocery store: checkout line")}</option>
+                        <option value="clinic">{t("Clinic: waiting room")}</option>
+                        <option value="transitions">{t("Transitions: changing activities")}</option>
+                        <option value="routine">{t("Daily routine: getting ready")}</option>
+                        <option value="park">{t("Park: playground interaction")}</option>
+                        <option value="home">{t("Home: family time")}</option>
+                        <option value="restaurant">{t("Restaurant: dining out")}</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-sm text-zinc-700">{t("Desired tone")}</label>
+                      <select
+                        value={stageFraming.tone}
+                        onChange={(e) =>
+                          setStageFraming({
+                            ...stageFraming,
+                            tone: e.target.value,
+                          })
+                        }
+                        className="mt-1 w-full bg-white/90 border border-zinc-200 rounded-xl px-4 py-2"
+                      >
+                        <option value="brave">{t("Encouraging & brave")}</option>
+                        <option value="encouraging">{t("Encouraging & supportive")}</option>
+                        <option value="calm">{t("Calm & soothing")}</option>
+                        <option value="curious">{t("Curious & playful")}</option>
+                        <option value="confident">{t("Confident & empowering")}</option>
+                        <option value="gentle">{t("Gentle & reassuring")}</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-sm text-zinc-700">{t("Parent goal (optional)")}</label>
+                      <input
+                        value={stageFraming.parentGoal}
+                        onChange={(e) =>
+                          setStageFraming({
+                            ...stageFraming,
+                            parentGoal: e.target.value,
+                          })
+                        }
+                        placeholder={t("e.g., Practice waving back to a classmate")}
+                        className="mt-1 w-full bg-white/90 border border-zinc-200 rounded-xl px-4 py-2"
+                      />
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {activeStage === 2 && (
+                <div className="rounded-xl border border-zinc-200 p-4 bg-white space-y-4">
+                  <h3 className="text-lg font-semibold text-zinc-900">{t("Stage 2 · Immersion")}</h3>
+                  <p className="text-sm text-zinc-600">{t("Guide imagery and perspective‑taking; co‑play the avatar.")}</p>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-sm text-zinc-700">{t("Current feeling")}</label>
+                      <select
+                        value={stageImmersion.feeling}
+                        onChange={(e) =>
+                          setStageImmersion({
+                            ...stageImmersion,
+                            feeling: e.target.value,
+                          })
+                        }
+                        className="mt-1 w-full bg-white/90 border border-zinc-200 rounded-xl px-4 py-2"
+                      >
+                        <option value="shy">{t("Shy")}</option>
+                        <option value="excited">{t("Excited")}</option>
+                        <option value="nervous">{t("Nervous")}</option>
+                        <option value="proud">{t("Proud")}</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-sm text-zinc-700">{t("Co‑play prompt")}</label>
+                      <select
+                        value={stageImmersion.coplay}
+                        onChange={(e) =>
+                          setStageImmersion({
+                            ...stageImmersion,
+                            coplay: e.target.value,
+                          })
+                        }
+                        className="mt-1 w-full bg-white/90 border border-zinc-200 rounded-xl px-4 py-2"
+                      >
+                        <option value="wave">{t("Practice a superhero wave")}</option>
+                        <option value="share">{t("Offer a toy and say \"your turn\"")}</option>
+                        <option value="count">{t("Count to three together")}</option>
+                        <option value="breathe">{t("Do a 3‑breath sparkle")}</option>
+                      </select>
+                    </div>
+                    <div className="md:col-span-2">
+                      <label className="block text-sm text-zinc-700">{t("Imagery line (optional)")}</label>
+                      <textarea
+                        value={stageImmersion.imagery}
+                        onChange={(e) =>
+                          setStageImmersion({
+                            ...stageImmersion,
+                            imagery: e.target.value,
+                          })
+                        }
+                        placeholder={t("Describe what your child sees (e.g., 'Blue backpack, Mia smiles and waves').")}
+                        rows={2}
+                        className="mt-1 w-full bg-white/90 border border-zinc-200 rounded-xl px-4 py-2"
+                      />
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {activeStage === 3 && (
+                <div className="rounded-xl border border-zinc-200 p-4 bg-white space-y-4">
+                  <h3 className="text-lg font-semibold text-zinc-900">{t("Stage 3 · Reflection")}</h3>
+                  <p className="text-sm text-zinc-600">{t("Connect the story to real‑life experiences and log progress.")}</p>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-sm text-zinc-700">{t("What did your child try?")}</label>
+                      <input
+                        value={stageReflection.tried}
+                        onChange={(e) =>
+                          setStageReflection({
+                            ...stageReflection,
+                            tried: e.target.value,
+                          })
+                        }
+                        placeholder={t("e.g., Waved back and smiled")}
+                        className="mt-1 w-full bg-white/90 border border-zinc-200 rounded-xl px-4 py-2"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm text-zinc-700">{t("Parent confidence")}</label>
+                      <select
+                        value={stageReflection.confidence}
+                        onChange={(e) =>
+                          setStageReflection({
+                            ...stageReflection,
+                            confidence: e.target.value,
+                          })
+                        }
+                        className="mt-1 w-full bg-white/90 border border-zinc-200 rounded-xl px-4 py-2"
+                      >
+                        <option>{t("Low")}</option>
+                        <option>{t("Medium")}</option>
+                        <option>{t("High")}</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-sm text-zinc-700">{t("Child comfort")}</label>
+                      <select
+                        value={stageReflection.comfort}
+                        onChange={(e) =>
+                          setStageReflection({
+                            ...stageReflection,
+                            comfort: e.target.value,
+                          })
+                        }
+                        className="mt-1 w-full bg-white/90 border border-zinc-200 rounded-xl px-4 py-2"
+                      >
+                        <option>{t("Low")}</option>
+                        <option>{t("Medium")}</option>
+                        <option>{t("High")}</option>
+                      </select>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {activeStage === 4 && (
+                <div className="rounded-xl border border-zinc-200 p-4 bg-white space-y-4">
+                  <h3 className="text-lg font-semibold text-zinc-900">{t("Stage 4 · Continuity")}</h3>
+                  <p className="text-sm text-zinc-600">{t("Keep the arc going with micro‑quests and badges.")}</p>
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <div>
+                      <label className="block text-sm text-zinc-700">{t("Next arc")}</label>
+                      <select
+                        value={stageContinuity.nextArc}
+                        onChange={(e) =>
+                          setStageContinuity({
+                            ...stageContinuity,
+                            nextArc: e.target.value,
+                          })
+                        }
+                        className="mt-1 w-full bg-white/90 border border-zinc-200 rounded-xl px-4 py-2"
+                      >
+                        <option value="school-arc">{t("School Adventure (week)")}</option>
+                        <option value="friend-arc">{t("New Friend Mini‑Arc")}</option>
+                        <option value="store-arc">{t("Helper at the Store")}</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-sm text-zinc-700">{t("Reminder cadence")}</label>
+                      <select
+                        value={stageContinuity.cadence}
+                        onChange={(e) =>
+                          setStageContinuity({
+                            ...stageContinuity,
+                            cadence: e.target.value,
+                          })
+                        }
+                        className="mt-1 w-full bg-white/90 border border-zinc-200 rounded-xl px-4 py-2"
+                      >
+                        <option>{t("Daily")}</option>
+                        <option>{t("Every 2 days")}</option>
+                        <option>{t("Weekly")}</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-sm text-zinc-700">{t("Badge")}</label>
+                      <select
+                        value={stageContinuity.badge}
+                        onChange={(e) =>
+                          setStageContinuity({
+                            ...stageContinuity,
+                            badge: e.target.value,
+                          })
+                        }
+                        className="mt-1 w-full bg-white/90 border border-zinc-200 rounded-xl px-4 py-2"
+                      >
+                        <option value="bravery">{t("Bravery Badge")}</option>
+                        <option value="sharing">{t("Sharing Star")}</option>
+                        <option value="helper">{t("Helpful Hero")}</option>
+                      </select>
+                    </div>
+                  </div>
                 </div>
               )}
             </div>
 
-            <div>
-              <label
-                htmlFor="passport-select"
-                className="block text-sm text-zinc-700"
-              >{t("For Child (Passport)")}</label>
-              <select
-                id="passport-select"
-                value={selectedPassportId}
-                onChange={(e) => setSelectedPassportId(e.target.value)}
-                className="mt-1 w-full bg-white/90 border border-zinc-200 rounded-xl px-4 py-2 text-zinc-900 focus:outline-none focus:ring-2 focus:ring-rose-300/50 focus:border-rose-300 transition-all"
-              >
-                <option value="">{t("All Children / General")}</option>
-                {passports?.map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {p.childName}
-                  </option>
-                ))}
-              </select>
-              <p className="mt-1 text-xs text-zinc-500">{t("Select which child this story is for. Leave as \"All Children\" for stories that work for everyone.")}</p>
-            </div>
-
-            <div className="flex items-center gap-2">
-              <span className="text-sm text-zinc-700">{t("Add scene:")}</span>
+            <div className="mt-4 flex flex-wrap items-center gap-3">
               <button
                 type="button"
-                onClick={() => addStep("doctor")}
-                className="rounded-xl px-3 py-1.5 bg-[#315e4a] text-white hover:bg-[#244a39]"
-              >{t("Message")}</button>
-              <button
-                type="button"
-                onClick={() => addStep("user-input")}
-                className="rounded-xl px-3 py-1.5 bg-[#6b2a99] text-white hover:bg-[#244a39]"
-              >{t("Child's input")}</button>
-              <button
-                type="button"
-                onClick={() => addStep("choice")}
-                className="rounded-xl px-3 py-1.5 bg-[#244a39] text-white hover:bg-[#315e4a]"
-              >{t("Multiple choice")}</button>
-            </div>
-
-            <ol className="space-y-4">
-              {steps.map((step, idx) => (
-                <li
-                  key={step.id || `step-${idx}-${step.type}`}
-                  className="rounded-xl border border-zinc-200 p-4 bg-white"
-                >
-                  <div className="flex items-center justify-between">
-                    <div className="text-sm text-zinc-600">
-                      {t(getStepTypeLabel(step.type))}
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <button
-                        type="button"
-                        onClick={() => moveStep(step.id, "up")}
-                        className="rounded-lg px-2 py-1 text-zinc-700 hover:bg-zinc-100"
-                      >
-                        ↑
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => moveStep(step.id, "down")}
-                        className="rounded-lg px-2 py-1 text-zinc-700 hover:bg-zinc-100"
-                      >
-                        ↓
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => deleteStep(step.id)}
-                        className="rounded-lg px-2 py-1 text-red-600 hover:bg-red-50"
-                      >{t("Delete")}</button>
-                    </div>
-                  </div>
-
-                  {step.type === "doctor" && (
-                    <div className="mt-3 space-y-3">
-                      <div>
-                        <div className="flex items-center justify-between mb-1">
-                          <label className="block text-sm text-zinc-700">{t("Message")}</label>
-                          <VariableSelector
-                            onInsert={(variable) =>
-                              insertVariableAtCursor(
-                                step.id,
-                                "message",
-                                variable
-                              )
-                            }
-                          />
-                        </div>
-                        <textarea
-                          ref={(el) => {
-                            textareaRefs.current[`${step.id}-message`] = el;
-                          }}
-                          value={step.message}
-                          onChange={(e) =>
-                            updateStep(step.id, "message", e.target.value)
-                          }
-                          rows={3}
-                          placeholder={t("Write the message...")}
-                          className="mt-1 w-full bg-white/90 border border-zinc-200 rounded-xl px-4 py-2 text-zinc-900 placeholder-zinc-400 focus:outline-none focus:ring-2 focus:ring-rose-300/50 focus:border-rose-300 transition-all"
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-sm text-zinc-700">{t("Image (optional)")}</label>
-                        <div className="mt-1 flex gap-2">
-                          <input
-                            value={step.imageUrl || ""}
-                            onChange={(e) =>
-                              updateStep(step.id, "imageUrl", e.target.value)
-                            }
-                            placeholder={t("Paste an image link here (optional)")}
-                            className="flex-1 bg-white/90 border border-zinc-200 rounded-xl px-4 py-2 text-zinc-900 placeholder-zinc-400 focus:outline-none focus:ring-2 focus:ring-rose-300/50 focus:border-rose-300 transition-all"
-                          />
-                          <label className="rounded-xl px-4 py-2 bg-blue-50 hover:bg-blue-100 text-blue-700 text-sm font-medium border border-blue-200 cursor-pointer transition-colors flex items-center gap-1 whitespace-nowrap">
-                            <svg
-                              xmlns="http://www.w3.org/2000/svg"
-                              className="w-4 h-4"
-                              viewBox="0 0 20 20"
-                              fill="currentColor"
-                            >
-                              <path
-                                fillRule="evenodd"
-                                d="M4 3a2 2 0 00-2 2v10a2 2 0 002 2h12a2 2 0 002-2V5a2 2 0 00-2-2H4zm12 12H4l4-8 3 6 2-4 3 6z"
-                                clipRule="evenodd"
-                              />
-                            </svg>{t("Upload")}<input
-                              type="file"
-                              accept="image/*"
-                              className="hidden"
-                              onChange={async (e) => {
-                                const file = e.target.files?.[0];
-                                if (file) {
-                                  try {
-                                    const dataURL = await fileToDataURL(file);
-                                    updateStep(step.id, "imageUrl", dataURL);
-                                  } catch (error) {
-                                    console.error(
-                                      "Error uploading image:",
-                                      error
-                                    );
-                                    alert(
-                                      "Failed to upload image. Please try again."
-                                    );
-                                  }
-                                }
-                                e.target.value = ""; // Reset input
-                              }}
-                            />
-                          </label>
-                        </div>
-                        {step.imageUrl && (
-                          <div className="mt-2 relative w-full max-w-xs aspect-4/3 rounded-lg overflow-hidden border border-zinc-200">
-                            <img
-                              src={step.imageUrl}
-                              alt={t("Step preview")}
-                              className="w-full h-full object-cover"
-                            />
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  )}
-
-                  {step.type === "user-input" && (
-                    <div className="mt-3 space-y-3">
-                      <div>
-                        <div className="flex items-center justify-between mb-1">
-                          <label className="block text-sm text-zinc-700">{t("Prompt")}</label>
-                          <VariableSelector
-                            onInsert={(variable) =>
-                              insertVariableAtCursor(
-                                step.id,
-                                "message",
-                                variable
-                              )
-                            }
-                          />
-                        </div>
-                        <textarea
-                          ref={(el) => {
-                            textareaRefs.current[`${step.id}-message`] = el;
-                          }}
-                          value={step.message}
-                          onChange={(e) =>
-                            updateStep(step.id, "message", e.target.value)
-                          }
-                          rows={2}
-                          placeholder={t("Ask the child a question...")}
-                          className="mt-1 w-full bg-white/90 border border-zinc-200 rounded-xl px-4 py-2 text-zinc-900 placeholder-zinc-400 focus:outline-none focus:ring-2 focus:ring-rose-300/50 focus:border-rose-300 transition-all"
-                        />
-                      </div>
-                      <div>
-                        <div className="flex items-center justify-between mb-1">
-                          <label className="block text-sm text-zinc-700">{t("Placeholder")}</label>
-                          <VariableSelector
-                            onInsert={(variable) =>
-                              insertVariableAtCursor(
-                                step.id,
-                                "placeholder",
-                                variable
-                              )
-                            }
-                          />
-                        </div>
-                        <input
-                          ref={(el) => {
-                            textareaRefs.current[`${step.id}-placeholder`] = el;
-                          }}
-                          value={step.placeholder || ""}
-                          onChange={(e) =>
-                            updateStep(step.id, "placeholder", e.target.value)
-                          }
-                          placeholder={t("Enter the child's response...")}
-                          className="mt-1 w-full bg-white/90 border border-zinc-200 rounded-xl px-4 py-2 text-zinc-900 placeholder-zinc-400 focus:outline-none focus:ring-2 focus:ring-rose-300/50 focus:border-rose-300 transition-all"
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-sm text-zinc-700">{t("Image (optional)")}</label>
-                        <div className="mt-1 flex gap-2">
-                          <input
-                            value={step.imageUrl || ""}
-                            onChange={(e) =>
-                              updateStep(step.id, "imageUrl", e.target.value)
-                            }
-                            placeholder={t("Paste an image link here (optional)")}
-                            className="flex-1 bg-white/90 border border-zinc-200 rounded-xl px-4 py-2 text-zinc-900 placeholder-zinc-400 focus:outline-none focus:ring-2 focus:ring-rose-300/50 focus:border-rose-300 transition-all"
-                          />
-                          <label className="rounded-xl px-4 py-2 bg-blue-50 hover:bg-blue-100 text-blue-700 text-sm font-medium border border-blue-200 cursor-pointer transition-colors flex items-center gap-1 whitespace-nowrap">
-                            <svg
-                              xmlns="http://www.w3.org/2000/svg"
-                              className="w-4 h-4"
-                              viewBox="0 0 20 20"
-                              fill="currentColor"
-                            >
-                              <path
-                                fillRule="evenodd"
-                                d="M4 3a2 2 0 00-2 2v10a2 2 0 002 2h12a2 2 0 002-2V5a2 2 0 00-2-2H4zm12 12H4l4-8 3 6 2-4 3 6z"
-                                clipRule="evenodd"
-                              />
-                            </svg>{t("Upload")}<input
-                              type="file"
-                              accept="image/*"
-                              className="hidden"
-                              onChange={async (e) => {
-                                const file = e.target.files?.[0];
-                                if (file) {
-                                  try {
-                                    const dataURL = await fileToDataURL(file);
-                                    updateStep(step.id, "imageUrl", dataURL);
-                                  } catch (error) {
-                                    console.error(
-                                      "Error uploading image:",
-                                      error
-                                    );
-                                    alert(
-                                      "Failed to upload image. Please try again."
-                                    );
-                                  }
-                                }
-                                e.target.value = ""; // Reset input
-                              }}
-                            />
-                          </label>
-                        </div>
-                        {step.imageUrl && (
-                          <div className="mt-2 relative w-full max-w-xs aspect-4/3 rounded-lg overflow-hidden border border-zinc-200">
-                            <img
-                              src={step.imageUrl}
-                              alt={t("Step preview")}
-                              className="w-full h-full object-cover"
-                            />
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  )}
-
-                  {step.type === "choice" && (
-                    <div className="mt-3 space-y-3">
-                      <div>
-                        <div className="flex items-center justify-between mb-1">
-                          <label className="block text-sm text-zinc-700">{t("Question")}</label>
-                          <VariableSelector
-                            onInsert={(variable) =>
-                              insertVariableAtCursor(
-                                step.id,
-                                "message",
-                                variable
-                              )
-                            }
-                          />
-                        </div>
-                        <textarea
-                          ref={(el) => {
-                            textareaRefs.current[`${step.id}-message`] = el;
-                          }}
-                          value={step.message}
-                          onChange={(e) =>
-                            updateStep(step.id, "message", e.target.value)
-                          }
-                          rows={2}
-                          placeholder={t("Ask the child to choose...")}
-                          className="mt-1 w-full bg-white/90 border border-zinc-200 rounded-xl px-4 py-2 text-zinc-900 placeholder-zinc-400 focus:outline-none focus:ring-2 focus:ring-rose-300/50 focus:border-rose-300 transition-all"
-                        />
-                      </div>
-                      <div>
-                        <div className="flex items-center justify-between">
-                          <label className="block text-sm text-zinc-700">{t("Options")}</label>
-                          <button
-                            type="button"
-                            onClick={() => addChoiceOption(step.id)}
-                            className="rounded-lg px-3 py-1.5 bg-zinc-100 hover:bg-zinc-200 text-sm"
-                          >{t("Add option")}</button>
-                        </div>
-                        <div className="mt-2 space-y-2">
-                          {(step.options || []).map((opt, i) => (
-                            <div key={i} className="flex items-center gap-2">
-                              <input
-                                value={opt}
-                                onChange={(e) =>
-                                  updateChoiceOption(step.id, i, e.target.value)
-                                }
-                                placeholder={`Choice ${i + 1}`}
-                                className="flex-1 bg-white/90 border border-zinc-200 rounded-xl px-4 py-2 text-zinc-900 placeholder-zinc-400 focus:outline-none focus:ring-2 focus:ring-rose-300/50 focus:border-rose-300 transition-all"
-                              />
-                              <button
-                                type="button"
-                                onClick={() => removeChoiceOption(step.id, i)}
-                                className="rounded-lg px-2 py-2 text-red-600 hover:bg-red-50"
-                                title={t("Remove option")}
-                              >
-                                ✕
-                              </button>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                      <div>
-                        <label className="block text-sm text-zinc-700">{t("Image (optional)")}</label>
-                        <div className="mt-1 flex gap-2">
-                          <input
-                            value={step.imageUrl || ""}
-                            onChange={(e) =>
-                              updateStep(step.id, "imageUrl", e.target.value)
-                            }
-                            placeholder={t("Paste an image link here (optional)")}
-                            className="flex-1 bg-white/90 border border-zinc-200 rounded-xl px-4 py-2 text-zinc-900 placeholder-zinc-400 focus:outline-none focus:ring-2 focus:ring-rose-300/50 focus:border-rose-300 transition-all"
-                          />
-                          <label className="rounded-xl px-4 py-2 bg-blue-50 hover:bg-blue-100 text-blue-700 text-sm font-medium border border-blue-200 cursor-pointer transition-colors flex items-center gap-1 whitespace-nowrap">
-                            <svg
-                              xmlns="http://www.w3.org/2000/svg"
-                              className="w-4 h-4"
-                              viewBox="0 0 20 20"
-                              fill="currentColor"
-                            >
-                              <path
-                                fillRule="evenodd"
-                                d="M4 3a2 2 0 00-2 2v10a2 2 0 002 2h12a2 2 0 002-2V5a2 2 0 00-2-2H4zm12 12H4l4-8 3 6 2-4 3 6z"
-                                clipRule="evenodd"
-                              />
-                            </svg>{t("Upload")}<input
-                              type="file"
-                              accept="image/*"
-                              className="hidden"
-                              onChange={async (e) => {
-                                const file = e.target.files?.[0];
-                                if (file) {
-                                  try {
-                                    const dataURL = await fileToDataURL(file);
-                                    updateStep(step.id, "imageUrl", dataURL);
-                                  } catch (error) {
-                                    console.error(
-                                      "Error uploading image:",
-                                      error
-                                    );
-                                    alert(
-                                      "Failed to upload image. Please try again."
-                                    );
-                                  }
-                                }
-                                e.target.value = ""; // Reset input
-                              }}
-                            />
-                          </label>
-                        </div>
-                        {step.imageUrl && (
-                          <div className="mt-2 relative w-full max-w-xs aspect-4/3 rounded-lg overflow-hidden border border-zinc-200">
-                            <img
-                              src={step.imageUrl}
-                              alt={t("Step preview")}
-                              className="w-full h-full object-cover"
-                            />
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  )}
-                </li>
-              ))}
-            </ol>
-
-            <div className="flex items-center gap-3 pt-2">
-              <button
-                type="button"
-                onClick={handlePreview}
-                disabled={!isValid}
-                data-telemetry="parent_story_preview"
-                className="rounded-xl px-4 py-2 bg-[#315e4a] text-white hover:bg-[#244a39] disabled:opacity-50"
-              >{t("Preview")}</button>
-              <button
-                type="button"
-                onClick={handleSave}
-                disabled={!isValid || aiGenerating || saving}
-                data-telemetry={
-                  editingId ? "parent_story_update" : "parent_story_save"
+                onClick={generateStepsFromStages}
+                disabled={
+                  aiGenerating || (aiRetryAt && (aiNow || Date.now()) < aiRetryAt)
                 }
-                className="rounded-xl px-4 py-2 bg-[#315e4a] text-white hover:bg-[#244a39] disabled:opacity-50"
+                className="story-editor-button is-primary"
               >
-                {editingId ? t("Update story") : t("Save story")}
+                {aiGenerating
+                  ? t("Generating…")
+                  : aiRetryAt && (aiNow || Date.now()) < aiRetryAt
+                  ? t("Rate limited ({seconds}s)", { seconds: Math.ceil((aiRetryAt - (aiNow || Date.now())) / 1000) })
+                  : t("Generate step with Ai")}{" "}
+                <Sparkles className="inline-block w-4 h-4 mb-1" aria-hidden="true" />
               </button>
+              {aiError ? (
+                <span role="alert" className="text-sm text-red-700">{t(aiError)}</span>
+              ) : null}
             </div>
-          </div>
-        </div>
-
-        {/* Scene Design — NT‑UX Stages */}
-        <div className="rounded-2xl bg-white/80 backdrop-blur p-5 shadow-sm">
-          <div className="flex items-center justify-between">
-            <h2 className="text-xl font-semibold text-zinc-900">{t("Design Guide")}</h2>
-          </div>
-
-          <div className="mt-4 flex flex-wrap gap-2">
-            {[
-              { n: 1, label: "1. Framing" },
-              { n: 2, label: "2. Immersion" },
-              { n: 3, label: "3. Reflection" },
-              { n: 4, label: "4. Continuity" },
-            ].map((tab) => (
-              <button
-                key={tab.n}
-                type="button"
-                onClick={() => setActiveStage(tab.n)}
-                className={`px-4 py-2 rounded-full text-sm border ${
-                  activeStage === tab.n
-                    ? "bg-zinc-900 text-white border-zinc-900"
-                    : "bg-zinc-100 text-zinc-700 border-zinc-200 hover:bg-zinc-200"
-                }`}
-              >
-                {tab.label}
-              </button>
-            ))}
-          </div>
-
-          <div className="mt-4">
-            {activeStage === 1 && (
-              <div className="rounded-xl border border-zinc-200 p-4 bg-white space-y-4">
-                <h3 className="text-lg font-semibold text-zinc-900">{t("Stage 1 · Narrative Framing")}</h3>
-                <p className="text-sm text-zinc-600">{t("Personalize the setup and align with today's goal.")}</p>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-sm text-zinc-700">{t("Today's focus")}</label>
-                    <select
-                      value={stageFraming.focus}
-                      onChange={(e) =>
-                        setStageFraming({
-                          ...stageFraming,
-                          focus: e.target.value,
-                        })
-                      }
-                      className="mt-1 w-full bg-white/90 border border-zinc-200 rounded-xl px-4 py-2"
-                    >
-                      <option value="greeting">{t("Greeting / Saying hello")}</option>
-                      <option value="sharing">{t("Sharing / Turn‑taking")}</option>
-                      <option value="routine">{t("Morning routine")}</option>
-                      <option value="transitions">{t("Transitions: between activities")}</option>
-                      <option value="sensory">{t("Managing sensory surprises")}</option>
-                    </select>
-                  </div>
-                  <div>
-                    <label className="block text-sm text-zinc-700">{t("Scenario")}</label>
-                    <select
-                      value={stageFraming.scenario}
-                      onChange={(e) =>
-                        setStageFraming({
-                          ...stageFraming,
-                          scenario: e.target.value,
-                        })
-                      }
-                      className="mt-1 w-full bg-white/90 border border-zinc-200 rounded-xl px-4 py-2"
-                    >
-                      <option value="school">{t("School: arrival and wave")}</option>
-                      <option value="playdate">{t("Playdate: meet a new friend")}</option>
-                      <option value="store">{t("Grocery store: checkout line")}</option>
-                      <option value="clinic">{t("Clinic: waiting room")}</option>
-                      <option value="transitions">{t("Transitions: changing activities")}</option>
-                      <option value="routine">{t("Daily routine: getting ready")}</option>
-                      <option value="park">{t("Park: playground interaction")}</option>
-                      <option value="home">{t("Home: family time")}</option>
-                      <option value="restaurant">{t("Restaurant: dining out")}</option>
-                    </select>
-                  </div>
-                  <div>
-                    <label className="block text-sm text-zinc-700">{t("Desired tone")}</label>
-                    <select
-                      value={stageFraming.tone}
-                      onChange={(e) =>
-                        setStageFraming({
-                          ...stageFraming,
-                          tone: e.target.value,
-                        })
-                      }
-                      className="mt-1 w-full bg-white/90 border border-zinc-200 rounded-xl px-4 py-2"
-                    >
-                      <option value="brave">{t("Encouraging & brave")}</option>
-                      <option value="encouraging">{t("Encouraging & supportive")}</option>
-                      <option value="calm">{t("Calm & soothing")}</option>
-                      <option value="curious">{t("Curious & playful")}</option>
-                      <option value="confident">{t("Confident & empowering")}</option>
-                      <option value="gentle">{t("Gentle & reassuring")}</option>
-                    </select>
-                  </div>
-                  <div>
-                    <label className="block text-sm text-zinc-700">{t("Parent goal (optional)")}</label>
-                    <input
-                      value={stageFraming.parentGoal}
-                      onChange={(e) =>
-                        setStageFraming({
-                          ...stageFraming,
-                          parentGoal: e.target.value,
-                        })
-                      }
-                      placeholder={t("e.g., Practice waving back to a classmate")}
-                      className="mt-1 w-full bg-white/90 border border-zinc-200 rounded-xl px-4 py-2"
-                    />
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {activeStage === 2 && (
-              <div className="rounded-xl border border-zinc-200 p-4 bg-white space-y-4">
-                <h3 className="text-lg font-semibold text-zinc-900">{t("Stage 2 · Immersion")}</h3>
-                <p className="text-sm text-zinc-600">{t("Guide imagery and perspective‑taking; co‑play the avatar.")}</p>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-sm text-zinc-700">{t("Current feeling")}</label>
-                    <select
-                      value={stageImmersion.feeling}
-                      onChange={(e) =>
-                        setStageImmersion({
-                          ...stageImmersion,
-                          feeling: e.target.value,
-                        })
-                      }
-                      className="mt-1 w-full bg-white/90 border border-zinc-200 rounded-xl px-4 py-2"
-                    >
-                      <option value="shy">{t("Shy")}</option>
-                      <option value="excited">{t("Excited")}</option>
-                      <option value="nervous">{t("Nervous")}</option>
-                      <option value="proud">{t("Proud")}</option>
-                    </select>
-                  </div>
-                  <div>
-                    <label className="block text-sm text-zinc-700">{t("Co‑play prompt")}</label>
-                    <select
-                      value={stageImmersion.coplay}
-                      onChange={(e) =>
-                        setStageImmersion({
-                          ...stageImmersion,
-                          coplay: e.target.value,
-                        })
-                      }
-                      className="mt-1 w-full bg-white/90 border border-zinc-200 rounded-xl px-4 py-2"
-                    >
-                      <option value="wave">{t("Practice a superhero wave")}</option>
-                      <option value="share">{t("Offer a toy and say \"your turn\"")}</option>
-                      <option value="count">{t("Count to three together")}</option>
-                      <option value="breathe">{t("Do a 3‑breath sparkle")}</option>
-                    </select>
-                  </div>
-                  <div className="md:col-span-2">
-                    <label className="block text-sm text-zinc-700">{t("Imagery line (optional)")}</label>
-                    <textarea
-                      value={stageImmersion.imagery}
-                      onChange={(e) =>
-                        setStageImmersion({
-                          ...stageImmersion,
-                          imagery: e.target.value,
-                        })
-                      }
-                      placeholder={t("Describe what your child sees (e.g., 'Blue backpack, Mia smiles and waves').")}
-                      rows={2}
-                      className="mt-1 w-full bg-white/90 border border-zinc-200 rounded-xl px-4 py-2"
-                    />
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {activeStage === 3 && (
-              <div className="rounded-xl border border-zinc-200 p-4 bg-white space-y-4">
-                <h3 className="text-lg font-semibold text-zinc-900">{t("Stage 3 · Reflection")}</h3>
-                <p className="text-sm text-zinc-600">{t("Connect the story to real‑life experiences and log progress.")}</p>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-sm text-zinc-700">{t("What did your child try?")}</label>
-                    <input
-                      value={stageReflection.tried}
-                      onChange={(e) =>
-                        setStageReflection({
-                          ...stageReflection,
-                          tried: e.target.value,
-                        })
-                      }
-                      placeholder={t("e.g., Waved back and smiled")}
-                      className="mt-1 w-full bg-white/90 border border-zinc-200 rounded-xl px-4 py-2"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm text-zinc-700">{t("Parent confidence")}</label>
-                    <select
-                      value={stageReflection.confidence}
-                      onChange={(e) =>
-                        setStageReflection({
-                          ...stageReflection,
-                          confidence: e.target.value,
-                        })
-                      }
-                      className="mt-1 w-full bg-white/90 border border-zinc-200 rounded-xl px-4 py-2"
-                    >
-                      <option>{t("Low")}</option>
-                      <option>{t("Medium")}</option>
-                      <option>{t("High")}</option>
-                    </select>
-                  </div>
-                  <div>
-                    <label className="block text-sm text-zinc-700">{t("Child comfort")}</label>
-                    <select
-                      value={stageReflection.comfort}
-                      onChange={(e) =>
-                        setStageReflection({
-                          ...stageReflection,
-                          comfort: e.target.value,
-                        })
-                      }
-                      className="mt-1 w-full bg-white/90 border border-zinc-200 rounded-xl px-4 py-2"
-                    >
-                      <option>{t("Low")}</option>
-                      <option>{t("Medium")}</option>
-                      <option>{t("High")}</option>
-                    </select>
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {activeStage === 4 && (
-              <div className="rounded-xl border border-zinc-200 p-4 bg-white space-y-4">
-                <h3 className="text-lg font-semibold text-zinc-900">{t("Stage 4 · Continuity")}</h3>
-                <p className="text-sm text-zinc-600">{t("Keep the arc going with micro‑quests and badges.")}</p>
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                  <div>
-                    <label className="block text-sm text-zinc-700">{t("Next arc")}</label>
-                    <select
-                      value={stageContinuity.nextArc}
-                      onChange={(e) =>
-                        setStageContinuity({
-                          ...stageContinuity,
-                          nextArc: e.target.value,
-                        })
-                      }
-                      className="mt-1 w-full bg-white/90 border border-zinc-200 rounded-xl px-4 py-2"
-                    >
-                      <option value="school-arc">{t("School Adventure (week)")}</option>
-                      <option value="friend-arc">{t("New Friend Mini‑Arc")}</option>
-                      <option value="store-arc">{t("Helper at the Store")}</option>
-                    </select>
-                  </div>
-                  <div>
-                    <label className="block text-sm text-zinc-700">{t("Reminder cadence")}</label>
-                    <select
-                      value={stageContinuity.cadence}
-                      onChange={(e) =>
-                        setStageContinuity({
-                          ...stageContinuity,
-                          cadence: e.target.value,
-                        })
-                      }
-                      className="mt-1 w-full bg-white/90 border border-zinc-200 rounded-xl px-4 py-2"
-                    >
-                      <option>{t("Daily")}</option>
-                      <option>{t("Every 2 days")}</option>
-                      <option>{t("Weekly")}</option>
-                    </select>
-                  </div>
-                  <div>
-                    <label className="block text-sm text-zinc-700">{t("Badge")}</label>
-                    <select
-                      value={stageContinuity.badge}
-                      onChange={(e) =>
-                        setStageContinuity({
-                          ...stageContinuity,
-                          badge: e.target.value,
-                        })
-                      }
-                      className="mt-1 w-full bg-white/90 border border-zinc-200 rounded-xl px-4 py-2"
-                    >
-                      <option value="bravery">{t("Bravery Badge")}</option>
-                      <option value="sharing">{t("Sharing Star")}</option>
-                      <option value="helper">{t("Helpful Hero")}</option>
-                    </select>
-                  </div>
-                </div>
-              </div>
-            )}
-          </div>
-
-          <div className="mt-4 flex items-center gap-3">
-            <button
-              type="button"
-              onClick={generateStepsFromStages}
-              disabled={
-                aiGenerating || (aiRetryAt && (aiNow || Date.now()) < aiRetryAt)
-              }
-              className="rounded-xl px-4 py-2 bg-[#315e4a] text-white hover:bg-[#244a39]"
-            >
-              {aiGenerating
-                ? t("Generating…")
-                : aiRetryAt && (aiNow || Date.now()) < aiRetryAt
-                ? t("Rate limited ({seconds}s)", { seconds: Math.ceil((aiRetryAt - (aiNow || Date.now())) / 1000) })
-                : t("Generate step with Ai")}{" "}
-              <Sparkles className="inline-block w-4 h-4 mb-1" />
-            </button>
-            {aiError ? (
-              <span role="alert" className="text-sm text-red-700">{t(aiError)}</span>
-            ) : null}
-          </div>
-        </div>
-      </div>
-      </fieldset>
-    </section>
+          </details>
+        </fieldset>
+      </section>
+    </>
   );
 }
