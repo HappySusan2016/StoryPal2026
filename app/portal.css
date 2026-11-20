@@ -902,6 +902,7 @@
     margin: 14px 0 0;
     padding: 0;
     display: grid;
+    grid-template-columns: minmax(0, 1fr);
     gap: 8px;
   }
   .story-list li {
@@ -2154,7 +2155,6 @@
   background: var(--white);
   box-shadow: var(--card-shadow);
 }
-.story-reader-layout.story-reader-child { grid-template-columns: minmax(0, 1fr); }
 .story-reader-layout .story-print-step :is(p, input, button) {
   font-size: calc(1rem * var(--reader-scale));
   overflow-wrap: anywhere;

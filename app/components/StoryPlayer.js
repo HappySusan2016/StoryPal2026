@@ -62,7 +62,7 @@ export default function StoryPlayer({
   const isPreview = layout === "preview";
   const isReader = layout === "reader";
   const isModal = layout === "modal";
-  const showParentGuide = !isPreview && !childMode;
+  const showParentGuide = !isPreview;
   const [readerTextIndex, setReaderTextIndex] = useState(() => isReader ? loadReaderTextSize() : 0);
   const readerTextSize = READER_TEXT_SIZES[readerTextIndex];
   const title = moduleDefinition?.title || "Story";
@@ -702,7 +702,7 @@ export default function StoryPlayer({
 
   /** @module Storybook content, parent guidance, and completion state */
   const playerClassName = isReader
-    ? `story-reader-layout story-player-content${childMode ? " story-reader-child" : ""}`
+    ? "story-reader-layout story-player-content"
     : `relative w-full rounded-2xl bg-white shadow-lg flex flex-col lg:flex-row overflow-hidden story-player-content ${isPreview ? "story-preview-stage" : "z-10 max-w-6xl max-h-[90vh] min-h-[600px] animate-[fadeInUp_200ms_ease-out]"}`;
 
   const printPages = isPrinting && (
