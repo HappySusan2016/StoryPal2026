@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   EmailAuthProvider,
@@ -11,6 +11,7 @@ import {
   updateProfile,
 } from "firebase/auth";
 import { auth } from "../lib/firebaseClient";
+import DeleteConfirmDialog from "../components/DeleteConfirmDialog";
 import PortalShell from "../components/PortalShell";
 import PortalText from "../components/PortalText";
 import { translations } from "../lib/translations";
@@ -45,6 +46,7 @@ export default function SettingsPage() {
     try {
       await action();
       setMessage(t("Saved."));
+      return true;
     } catch (err) {
       setError(
         t(
@@ -54,6 +56,7 @@ export default function SettingsPage() {
             : "Could not save changes. Please try again.",
         ),
       );
+      return false;
     } finally {
       setBusy(false);
     }
@@ -84,6 +87,22 @@ export default function SettingsPage() {
     }
     router.replace("/login");
   }
+  /** @module Account deletion confirmation */
+  const deleteDialogRef = useRef(null);
+
+  function handleOpenDeleteDialog(event) {
+    event.preventDefault();
+    if (busy) return;
+    setError("");
+    deleteDialogRef.current.open();
+  }
+
+  async function handleConfirmDelete() {
+    if (busy) return;
+    const completed = await handleAction(() => handleExit(true));
+    if (completed) deleteDialogRef.current?.close();
+  }
+
   /** @module Reference preference options and preview */
   function renderChoices(name, value, options, setter) {
     const fontNames = {
@@ -397,15 +416,10 @@ export default function SettingsPage() {
               <h2>{t("Delete everything")}</h2>
               <p>
                 {t(
-                  "Removes your account, every child profile, passport notes and story from this computer's database. It cannot be undone.",
+                  "Permanently deletes your account, all child profiles, passport notes, and stories from StoryPal's cloud storage. This action cannot be undone.",
                 )}
               </p>
-              <form
-                onSubmit={(e) => {
-                  e.preventDefault();
-                  handleAction(() => handleExit(true));
-                }}
-              >
+              <form onSubmit={handleOpenDeleteDialog}>
                 <label htmlFor="delete-password">
                   {t("Confirm your password")}
                 </label>
@@ -425,6 +439,17 @@ export default function SettingsPage() {
                   {t("Delete my account")}
                 </button>
               </form>
+              <DeleteConfirmDialog
+                ref={deleteDialogRef}
+                title={t("Delete my account")}
+                description={t(
+                  "You are about to delete data. Please confirm whether to continue.",
+                )}
+                confirmLabel={t("Continue")}
+                busy={busy}
+                error={error}
+                onConfirm={handleConfirmDelete}
+              />
             </div>
           </section>
         )}

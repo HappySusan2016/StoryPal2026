@@ -2,7 +2,7 @@
  * Use the font families registered by next/font and the reference project's fallback order for Chinese characters and symbols. */
 @scope (.portal) to (.story-editor-controls) {
   :scope,
-  :where(*):not(:where(.story-delete-icon svg, .story-delete-icon svg *)) {
+  :where(*):not(:where(.story-delete-icon svg, .story-delete-icon svg *, .success-message-icon, .success-message-icon *)) {
     all: revert;
   }
   :scope {
@@ -1884,6 +1884,7 @@
 @scope (.portal) {
   .passport-fields fieldset, .profile-form-card fieldset { margin: 14px 0; padding: 14px; border: 1px solid var(--line); border-radius: 12px; min-width: 0; }
   .passport-fields legend, .profile-form-card legend { color: var(--green); font-weight: 600; }
+
   .analytics-page { padding: 32px 0; color: var(--ink); }
   .analytics-page h1 { margin-bottom: 16px; }
   .analytics-page h2, .analytics-page h3 { margin-bottom: 12px; }

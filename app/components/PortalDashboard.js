@@ -3,13 +3,14 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
-import { Trash2 } from "lucide-react";
 import { useTranslation } from "../hooks/useTranslation";
 import { toMillis } from "../lib/portalData";
 import { getDefaultStoryTemplate } from "../lib/defaultModules";
 import { subscribeToReadingPageCounts } from "../lib/readingSessions";
 
+import DeleteConfirmDialog from "./DeleteConfirmDialog";
 import PassportFields from "./PassportFields";
+import SuccessMessage from "./SuccessMessage";
 import { hasDuplicateChildName, updatePassportFromForm } from "../lib/passportFields";
 
 /** @module Parent dashboard and child profile details */
@@ -57,6 +58,14 @@ export default function PortalDashboard({
     ? passports.reduce((total, passport) => total + (counts.get(passport.id) || 0), 0)
     : "—";
 
+  /** @module Profile save feedback */
+  const [savedProfile, setSavedProfile] = useState(null);
+  useEffect(() => {
+    if (!savedProfile) return;
+    const timeout = window.setTimeout(() => setSavedProfile(null), 3000);
+    return () => window.clearTimeout(timeout);
+  }, [savedProfile]);
+
   /** @module Profile and storybook actions */
   async function handleAction(action, reportError = setError) {
     setBusy(true);
@@ -76,8 +85,19 @@ export default function PortalDashboard({
   }
   function handleSave(event, existing) {
     event.preventDefault();
-    const data = new FormData(event.currentTarget);
+    const form = event.currentTarget;
+    setSavedProfile(null);
+    const data = new FormData(form);
     const next = updatePassportFromForm(existing, data, crypto.randomUUID());
+    // Validate the trimmed name and optional age before creating the profile.
+    if (!existing && !next.childName) {
+      setPassportError("Enter a child name.");
+      return;
+    }
+    if (!existing && !/^[0-9]*$/.test(next.age)) {
+      setPassportError("Enter digits only for age.");
+      return;
+    }
     // Check the loaded profile list first so the form can flag duplicate names immediately.
     if (hasDuplicateChildName(next, passports, existing)) {
       setPassportError("A child profile with this name already exists.");
@@ -85,8 +105,15 @@ export default function PortalDashboard({
     }
     return handleAction(async () => {
       await onSavePassport(next);
-      // Open the full profile page after the new profile and default storybooks are saved.
-      if (!existing) router.push(`/profiles/${next.id}`);
+      if (!existing) {
+        router.push(`/profiles/${next.id}`);
+        return;
+      }
+      // Collapse the form sections after a successful save while preserving the inputs and their values.
+      form.querySelectorAll("details[open]").forEach((section) => {
+        section.open = false;
+      });
+      setSavedProfile({ id: next.id });
     }, setPassportError);
   }
   function renderDetails(existing) {
@@ -98,22 +125,68 @@ export default function PortalDashboard({
     );
   }
 
-  /** @module Storybook deletion confirmation */
-  const deleteDialogRef = useRef(null);
-  const cancelDeleteRef = useRef(null);
-  const [storyToDelete, setStoryToDelete] = useState(null);
+  /** @module Profile deletion success message */
+  const [profileDeleted, setProfileDeleted] = useState(false);
+  const profileDeletedKey = `sp.profileDeleted.${uid}`;
 
-  function handleOpenDeleteDialog(story) {
+  useEffect(() => {
+    if (!uid || profileId) return;
+    let dismissTimeout;
+    const showTimeout = window.setTimeout(() => {
+      try {
+        if (sessionStorage.getItem(profileDeletedKey) !== "1") return;
+        // Show the message on the home page only once so it does not reappear after a refresh.
+        sessionStorage.removeItem(profileDeletedKey);
+      } catch {
+        return;
+      }
+      setProfileDeleted(true);
+      dismissTimeout = window.setTimeout(() => setProfileDeleted(false), 3000);
+    }, 0);
+    return () => {
+      window.clearTimeout(showTimeout);
+      window.clearTimeout(dismissTimeout);
+    };
+  }, [uid, profileId, profileDeletedKey]);
+
+  /** @module Profile and storybook deletion confirmation */
+  const deleteDialogRef = useRef(null);
+  const [deleteTarget, setDeleteTarget] = useState(null);
+  const isProfileDeletion = deleteTarget?.type === "profile";
+
+  function handleOpenDeleteDialog(target) {
     setError("");
-    setStoryToDelete(story);
-    deleteDialogRef.current.showModal();
-    cancelDeleteRef.current.focus();
+    setDeleteTarget(target);
+    deleteDialogRef.current.open();
+  }
+
+  function handleDeleteProfileSubmit(event) {
+    event.preventDefault();
+    if (!profile || busy || loading) return;
+    handleOpenDeleteDialog({
+      type: "profile",
+      id: profile.id,
+      name: profile.childName,
+    });
   }
 
   async function handleConfirmDelete() {
-    if (!storyToDelete || busy) return;
-    const deleted = await handleAction(() => onDeleteStory(storyToDelete.id));
-    if (deleted) deleteDialogRef.current?.close();
+    if (!deleteTarget || busy) return;
+    const deleted = await handleAction(() =>
+      isProfileDeletion
+        ? onDeletePassport(deleteTarget.id)
+        : onDeleteStory(deleteTarget.id),
+    );
+    if (!deleted) return;
+    deleteDialogRef.current?.close();
+    if (isProfileDeletion) {
+      try {
+        sessionStorage.setItem(profileDeletedKey, "1");
+      } catch {
+        // Return to the home page even if the browser blocks session storage.
+      }
+      router.replace("/");
+    }
   }
 
   /** @module Storybook list */
@@ -124,7 +197,7 @@ export default function PortalDashboard({
           <li key={story.id}>
             <span className="icon" aria-hidden="true">▶</span>
             <div className="meta">
-              <button className="story-title-button" type="button" onClick={() => onRead(story)}>
+              <button className="story-title-button" type="button" onClick={() => false && onRead(story)}>
                 {story.title}
               </button>
               <span>
@@ -134,7 +207,9 @@ export default function PortalDashboard({
               </span>
             </div>
             <div className="story-actions">
+              {profileList && (
                 <button className="secondary" type="button" onClick={() => onRead(story)}>{t("Read")}</button>
+              )}
               {/* The home workshop only opens built-in storybooks for reading. */}
               {(profileList || !getDefaultStoryTemplate(story)) && <>
                 <button className="secondary" type="button" onClick={() => onEdit(story)}>{t("Edit")}</button>
@@ -142,7 +217,7 @@ export default function PortalDashboard({
                   className="secondary danger"
                   type="button"
                   disabled={busy}
-                  onClick={() => handleOpenDeleteDialog(story)}
+                  onClick={() => handleOpenDeleteDialog({ type: "story", id: story.id, name: story.title })}
                 >{t("Delete")}</button>
               </>}
             </div>
@@ -175,57 +250,37 @@ export default function PortalDashboard({
 
   return (
     <main className={profile ? "workspace" : "dashboard"}>
+      {!profileId && (
+        <SuccessMessage message={profileDeleted ? t("Profile deleted successfully") : null} />
+      )}
       {loadError && (
         <p className="notice error" role="alert">
           {t(loadError)}
         </p>
       )}
-      {error && !storyToDelete && (
+      {error && !deleteTarget && (
         <p role="alert" className="notice">
           {t(error)}
         </p>
       )}
-      <dialog
+      <DeleteConfirmDialog
         ref={deleteDialogRef}
-        className="story-delete-dialog"
-        aria-labelledby="story-delete-title"
-        aria-describedby="story-delete-description"
-        aria-busy={busy}
-        onCancel={(event) => {
-          if (busy) event.preventDefault();
-        }}
+        title={isProfileDeletion ? t("Delete this profile") : t("Delete this story?")}
+        itemName={deleteTarget?.name}
+        description={
+          isProfileDeletion
+            ? t("You are about to delete data. Please confirm whether to continue.")
+            : t("Delete this story permanently.")
+        }
+        confirmLabel={isProfileDeletion ? t("Continue") : t("Delete")}
+        busy={busy}
+        error={error && deleteTarget ? t(error) : ""}
+        onConfirm={handleConfirmDelete}
         onClose={() => {
           setError("");
-          setStoryToDelete(null);
+          setDeleteTarget(null);
         }}
-      >
-        <span className="story-delete-icon" aria-hidden="true">
-          <Trash2 size={22} />
-        </span>
-        <h2 id="story-delete-title">{t("Delete this story?")}</h2>
-        <p className="story-delete-name">{storyToDelete?.title}</p>
-        <p id="story-delete-description">{t("Delete this story permanently.")}</p>
-        {error && storyToDelete && <p role="alert" className="notice error">{t(error)}</p>}
-        <div className="story-delete-actions">
-          <button
-            ref={cancelDeleteRef}
-            className="secondary"
-            type="button"
-            disabled={busy}
-            onClick={() => deleteDialogRef.current.close()}
-          >
-            {t("Cancel")}
-          </button>
-          <button
-            className="story-delete-confirm"
-            type="button"
-            disabled={busy}
-            onClick={handleConfirmDelete}
-          >
-            {t("Delete")}
-          </button>
-        </div>
-      </dialog>
+      />
       {profile ? (
         <>
           <Link className="back profile-back" href="/">
@@ -256,6 +311,7 @@ export default function PortalDashboard({
             </div>
           </div>
           <section className="card">
+            <SuccessMessage message={savedProfile?.id === profile.id ? t("Changes saved successfully") : null} />
             <div className="section-label">{t("COMMUNICATION PASSPORT")}</div>
             <h2>{t("Update details")}</h2>
             <form className="profile-details-form passport-fields" key={profile.id} onSubmit={e => handleSave(e, profile)} onInput={() => setPassportError("")}>
@@ -291,15 +347,7 @@ export default function PortalDashboard({
                 "The profile will be removed. Its stories will be kept without a profile.",
               )}
             </p>
-            <form
-              onSubmit={(e) => {
-                e.preventDefault();
-                handleAction(async () => {
-                  await onDeletePassport(profile.id);
-                  router.push("/");
-                });
-              }}
-            >
+            <form onSubmit={handleDeleteProfileSubmit}>
               <label className="check">
                 <input type="checkbox" required />
                 <span>{t("I understand this removes the profile.")}</span>
@@ -413,7 +461,7 @@ export default function PortalDashboard({
                           <Link href={`/profiles/${p.id}`}>{p.childName}</Link>
                         </h3>
                         <p>
-                          {p.age || ""} · {p.interaction?.interests || ""}
+                          {p.age || ""}
                         </p>
                       </div>
                       <div className="spacer">

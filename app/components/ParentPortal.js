@@ -9,7 +9,7 @@ import PortalShell from "./PortalShell";
 import { PortalLanding } from "./PortalAuth";
 import { detachProfileFromStories, getProfileStories } from "../lib/portalData";
 import { hasDuplicateChildName } from "../lib/passportFields";
-import { createDefaultModules, getMissingDefaultModules } from "../lib/defaultModules";
+import { getMissingDefaultModules } from "../lib/defaultModules";
 import PortalJournal from "./PortalJournal";
 
 import StoryModules from "./StoryModules";
@@ -22,10 +22,12 @@ import {
   doc,
   getDocs,
   getDocsFromServer,
+  query,
   serverTimestamp,
   runTransaction,
   setDoc,
   updateDoc,
+  where,
   writeBatch,
 } from "firebase/firestore";
 import { AlertTriangle, Check, LoaderCircle, RotateCcw } from "lucide-react";
@@ -209,12 +211,9 @@ export default function ParentPortal({ initialProfileId = null, storyEditor = nu
       setModulesLoading(true);
       setDataError("");
       const uid = currentUser.uid;
-      let loadedCloudModules = null;
-      let loadedCloudPassports = null;
       try {
         const snap = await getDocs(collection(db, "users", uid, "modules"));
         const cloudModules = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
-        loadedCloudModules = cloudModules;
 
         if (!cancelled) {
           setModules(cloudModules);
@@ -241,7 +240,6 @@ export default function ParentPortal({ initialProfileId = null, storyEditor = nu
           id: d.id,
           ...d.data(),
         }));
-        loadedCloudPassports = cloudPassports;
         if (!cancelled) {
           setPassports(cloudPassports);
           savePassportsToStorage(cloudPassports, uid);
@@ -256,36 +254,6 @@ export default function ParentPortal({ initialProfileId = null, storyEditor = nu
         const loadedPassports = loadPassportsFromStorage(uid);
         if (!cancelled) {
           setPassports(loadedPassports);
-        }
-      }
-
-      // Backfill only after both cloud reads succeed, so missing cache entries are not mistaken for missing cloud records.
-      if (!cancelled && loadedCloudModules && loadedCloudPassports) {
-        const missing = getMissingDefaultModules(loadedCloudModules, loadedCloudPassports);
-        const mergedModules = new Map(loadedCloudModules.map(story => [story.id, story]));
-        try {
-          for (let offset = 0; offset < missing.length && !cancelled; offset += 400) {
-            const candidates = missing.slice(offset, offset + 400);
-            const prepared = await runTransaction(db, async transaction => {
-              const refs = candidates.map(story => doc(db, "users", uid, "modules", story.id));
-              const snapshots = await Promise.all(refs.map(ref => transaction.get(ref)));
-              return candidates.map((story, index) => {
-                // Preserve storybooks created or edited concurrently in another page. Never overwrite them with defaults.
-                if (snapshots[index].exists()) return { ...snapshots[index].data(), id: story.id };
-                transaction.set(refs[index], story);
-                return story;
-              });
-            });
-            prepared.forEach(story => mergedModules.set(story.id, story));
-            if (!cancelled) {
-              const next = Array.from(mergedModules.values());
-              setModules(next);
-              saveModulesToStorage(next, uid);
-            }
-          }
-        } catch (error) {
-          console.error("Failed to prepare default stories", error);
-          if (!cancelled) setDataError("Default stories could not be prepared. Please try again.");
         }
       }
 
@@ -543,7 +511,7 @@ export default function ParentPortal({ initialProfileId = null, storyEditor = nu
     router.push(`/stories/new?${params}`);
   }
 
-  /** @module Child profile persistence */
+  /** @module Child profile saving */
   async function handleSavePassport(passport) {
     const uid = currentUser.uid;
     const accountRef = doc(db, "users", uid);
@@ -559,15 +527,36 @@ export default function ParentPortal({ initialProfileId = null, storyEditor = nu
         throw Object.assign(new Error("Duplicate child name"), { code: "duplicate-child-name" });
       }
 
-      // Commit the profile and its default storybooks together to prevent partial creation.
-      const stories = existing.exists() ? [] : createDefaultModules(passport.id);
+      // Initialize storybooks only on the first save from the profile details page. Commit the completion flag and storybooks with the profile.
+      const initializeStories = initialProfileId === passport.id &&
+        !existing.data()?.defaultStoriesInitializedAt;
+      let stories = [];
+      if (initializeStories) {
+        const modulesRef = collection(accountRef, "modules");
+        const linked = await getDocsFromServer(query(modulesRef, where("childId", "==", passport.id)));
+        const linkedStories = linked.docs.map(item => ({ ...item.data(), id: item.id }));
+        const missing = getMissingDefaultModules(linkedStories, [passport]);
+        const refs = missing.map(story => doc(modulesRef, story.id));
+        const snapshots = await Promise.all(refs.map(ref => transaction.get(ref)));
+        // Read the candidate documents within the transaction to avoid overwriting storybooks written after the query.
+        stories = missing.filter((story, index) => {
+          if (snapshots[index].exists()) return false;
+          transaction.set(refs[index], story);
+          return true;
+        });
+      }
+
       transaction.set(accountRef, { passportsUpdatedAt: serverTimestamp() }, { merge: true });
-      transaction.set(passportRef, { ...passport, updatedAt: serverTimestamp() }, { merge: true });
-      stories.forEach(story => transaction.set(doc(accountRef, "modules", story.id), story));
+      transaction.set(passportRef, {
+        ...passport,
+        updatedAt: serverTimestamp(),
+        ...(initializeStories && { defaultStoriesInitializedAt: serverTimestamp() }),
+      }, { merge: true });
       return stories;
     });
     if (defaults.length) {
-      const nextModules = [...modules, ...defaults];
+      const newIds = new Set(defaults.map(story => story.id));
+      const nextModules = [...modules.filter(story => !newIds.has(story.id)), ...defaults];
       setModules(nextModules);
       saveModulesToStorage(nextModules, currentUser.uid);
     }
@@ -608,7 +597,7 @@ export default function ParentPortal({ initialProfileId = null, storyEditor = nu
 
   if (authChecking)
     return (
-      <PortalShell>
+      <PortalShell childReading={childReader}>
         <main className="workspace" role="status">
           {t("Loading…")}
         </main>
@@ -616,7 +605,7 @@ export default function ParentPortal({ initialProfileId = null, storyEditor = nu
     );
   if (showAuthGate)
     return (
-      <PortalShell>
+      <PortalShell childReading={childReader}>
         <PortalLanding />
       </PortalShell>
     );
@@ -715,7 +704,7 @@ export default function ParentPortal({ initialProfileId = null, storyEditor = nu
 
   /** @module Shared layout for reading, creating, and editing storybooks */
   if (storyPage) {
-    const backLabel = childReader ? `← ${t("Back to story time")}` : storyPage.fromProfile && storyPassport
+    const backLabel = storyPage.fromProfile && storyPassport
       ? `← ${t("Back to {nickname}", { nickname: storyPassport.childName })}`
       : t("← Back to your space");
     const isEditing = Boolean(storyEditor?.storyId);
@@ -731,11 +720,11 @@ export default function ParentPortal({ initialProfileId = null, storyEditor = nu
 
     const heading = (
       <div>
-        {savingModule ? (
+        {!childReader && (savingModule ? (
           <span className="story-editor-back" aria-disabled="true">{backLabel}</span>
         ) : (
           <Link className="story-editor-back" href={storyBackHref}>{backLabel}</Link>
-        )}
+        ))}
         <h1>{title}</h1>
         {storyPassport && <p className="muted">{storyPassport.childName}</p>}
       </div>
@@ -839,8 +828,9 @@ export default function ParentPortal({ initialProfileId = null, storyEditor = nu
               }}
               onDelete={(id) => {
                 const next = reflections.filter((r) => r.id !== id);
-                setReflections(next);
+                // Update the list after the save succeeds. Keep the journal entry available for retry if the save fails.
                 saveReflectionsToStorage(next, currentUser?.uid);
+                setReflections(next);
               }}
             />
           }

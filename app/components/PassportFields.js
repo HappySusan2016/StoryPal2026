@@ -3,26 +3,50 @@
 import { useTranslation } from "../hooks/useTranslation";
 import { passportGroups } from "../lib/passportFields";
 
-/** @module Full profile form with avatar and other hidden data preserved on save */
+/** @module Communication passport form */
 export default function PassportFields({ passport, basicOnly = false }) {
   const { t } = useTranslation();
   const prefix = passport?.id || "new";
 
-  /** Associate each field with a label so the dashboard and details page share the same form structure. */
-  function renderInput(name, label, value, required = false) {
+  /** Fill in the example only when an empty input receives focus. FormData reads the current value on submission. */
+  function handleFillExample(event, example) {
+    const input = event.currentTarget;
+    if (input.value === "") input.value = example;
+  }
+
+  /** Keep only digits in the age field for new profiles, whether typed or pasted. */
+  function handleAgeInput(event) {
+    const input = event.currentTarget;
+    const digits = input.value.replace(/[^0-9]/g, "");
+    if (input.value !== digits) input.value = digits;
+  }
+
+  /** Associate inputs with their labels and keep the same field structure in the creation and details forms. */
+  function renderInput(name, label, value, placeholder, { required = false, example } = {}) {
     const id = `${prefix}-${name}`;
+    const isNewProfileAge = basicOnly && name === "age";
     return (
       <div key={name}>
         <label htmlFor={id}>{t(label)}</label>
-        <input id={id} name={name} defaultValue={value || ""} required={required} />
+        <input
+          id={id}
+          name={name}
+          defaultValue={value || ""}
+          placeholder={t(placeholder)}
+          required={required}
+          inputMode={isNewProfileAge ? "numeric" : undefined}
+          pattern={isNewProfileAge ? "[0-9]*" : undefined}
+          onInput={isNewProfileAge ? handleAgeInput : undefined}
+          onFocus={example ? (event) => handleFillExample(event, example) : undefined}
+        />
       </div>
     );
   }
 
   return (
     <>
-      {renderInput("childName", "Child name", passport?.childName, true)}
-      {renderInput("age", "Age (optional)", passport?.age)}
+      {renderInput("childName", "Child name", passport?.childName, "e.g., Alex", { required: true })}
+      {renderInput("age", "Age (optional)", passport?.age, "e.g., 6")}
       {!basicOnly && passportGroups.map(([group, label, fields]) => (
         <details key={group}>
           <summary>{t(label)}</summary>
@@ -43,8 +67,8 @@ export default function PassportFields({ passport, basicOnly = false }) {
                 ))}
               </fieldset>
             )}
-            {fields.map(([field, fieldLabel]) =>
-              renderInput(`${group}.${field}`, fieldLabel, passport?.[group]?.[field]),
+            {fields.map(([field, fieldLabel, placeholder, example]) =>
+              renderInput(`${group}.${field}`, fieldLabel, passport?.[group]?.[field], placeholder, { example }),
             )}
           </fieldset>
         </details>

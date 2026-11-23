@@ -355,6 +355,9 @@ export default function StoryPlayer({
       // Repeated triggers on the same page only advance to the next page.
       setCurrentStepIndex(currentStepIndex + 1);
       resetTransientState();
+    } else if (isModal && moduleId === "parent-training") {
+      // Close the dialog when parent training ends.
+      handleClose();
     } else {
       // Show celebration screen on last step completion
       resetTransientState();
@@ -863,9 +866,11 @@ export default function StoryPlayer({
           aria-label={`${t("Text size")}: ${t(readerTextSize.label)}`}>
           <span aria-hidden="true">Aa</span>{t("Text size")}
         </button>
-        <button type="button" className="tool-btn" onClick={handlePrint} disabled={isPrinting || !steps.length}>
-          <Printer className="size-[13px]" aria-hidden="true" />{t("Print")}
-        </button>
+        {!childMode && (
+          <button type="button" className="tool-btn" onClick={handlePrint} disabled={isPrinting || !steps.length}>
+            <Printer className="size-[13px]" aria-hidden="true" />{t("Print")}
+          </button>
+        )}
       </div>
       {!showCelebration && audioControls && (
         <section id="reader-audio-controls" aria-label={t("Audio Settings")} className="story-reader-audio-panel">
@@ -899,12 +904,12 @@ export default function StoryPlayer({
               {collectingStars ? t("Loading…") : `${t("Collect Your")} ${t("3 Stars")}`}
             </button>
           ))}
-          {(!childMode || (!starsCollected && !collectingStars)) && (
+          {/* {(!childMode || (!starsCollected && !collectingStars)) && (
             <div className="mt-4 flex flex-wrap justify-center gap-3">
               <button type="button" className="story-editor-button" onClick={handleReadAgain}>{t("Read again")}</button>
               <button type="button" className="story-editor-button" onClick={onFinished}>{t("All done")}</button>
             </div>
-          )}
+          )} */}
         </section>
       </>
     );

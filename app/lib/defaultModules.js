@@ -203,7 +203,7 @@ export function createDefaultModules(childId, createdAt = new Date().toISOString
   }));
 }
 
-/** Preserve the legacy sign-in backfill for default storybooks. Backfill per child without overwriting existing edits. */
+/** Find the default storybooks missing from the profile while preserving storybooks with legacy IDs and existing edits. */
 export function getMissingDefaultModules(stories, passports, createdAt) {
   const storyIdsByChild = new Map();
   for (const story of stories) {

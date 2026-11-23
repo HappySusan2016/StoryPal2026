@@ -21,7 +21,7 @@ function getFont() {
   return localStorage.getItem("sp.uiFont") || "classic";
 }
 
-/** @module Shared portal navigation */
+/** @module Portal navigation and footer */
 export default function PortalShell({ children, childReading = false }) {
   const { t, language } = useTranslation();
   const pathname = usePathname();
@@ -43,62 +43,65 @@ export default function PortalShell({ children, childReading = false }) {
         />
       )}
       <div className="page-shell">
-        <header className="topbar">
-          <Link className="brand" href="/">
-            <span className="brand-mark">✳</span>
-            <span>StoryPal</span>
-          </Link>
-          <nav className="nav" aria-label={t("Navigation")}>
-            {(user
-              ? [
-                  ["/", "My space"],
-                  ["/child", "Child mode"],
-                  ["/settings", "Settings"],
-                ]
-              : [
-                  ["/login", "Sign in"],
-                  ["/signup", "Create account"],
-                ]
-            ).map(([href, label]) => (
-              <Link
-                key={href}
-                data-telemetry={`nav_${href === "/" ? "home" : href.slice(1)}`}
-                href={href}
-                aria-current={
-                  pathname === href ||
-                  (href === "/child" && childReading) ||
-                  (href === "/" && !childReading && (pathname.startsWith("/profiles/") || pathname.startsWith("/stories/")))
-                    ? "page"
-                    : undefined
-                }
-                className={href === "/signup" ? "nav-cta" : ""}
-              >
-                {t(label)}
-              </Link>
-            ))}
-            {user && (
-              <form
-                onSubmit={async (event) => {
-                  event.preventDefault();
-                  await signOut(auth);
-                  window.location.assign("/login");
-                }}
-              >
-                <button type="submit">{t("Sign out")}</button>
-              </form>
-            )}
-          </nav>
-        </header>
+        {!childReading && (
+          <header className="topbar">
+            <Link className="brand" href="/">
+              <span className="brand-mark">✳</span>
+              <span>StoryPal</span>
+            </Link>
+            <nav className="nav" aria-label={t("Navigation")}>
+              {(user
+                ? [
+                    ["/", "My space"],
+                    ["/child", "Child mode"],
+                    ["/settings", "Settings"],
+                  ]
+                : [
+                    ["/login", "Sign in"],
+                    ["/signup", "Create account"],
+                  ]
+              ).map(([href, label]) => (
+                <Link
+                  key={href}
+                  data-telemetry={`nav_${href === "/" ? "home" : href.slice(1)}`}
+                  href={href}
+                  aria-current={
+                    pathname === href ||
+                    (href === "/" && (pathname.startsWith("/profiles/") || pathname.startsWith("/stories/")))
+                      ? "page"
+                      : undefined
+                  }
+                  className={href === "/signup" ? "nav-cta" : ""}
+                >
+                  {t(label)}
+                </Link>
+              ))}
+              {user && (
+                <form
+                  onSubmit={async (event) => {
+                    event.preventDefault();
+                    await signOut(auth);
+                    window.location.assign("/login");
+                  }}
+                >
+                  <button type="submit">{t("Sign out")}</button>
+                </form>
+              )}
+            </nav>
+          </header>
+        )}
         {children}
-        <footer>
-          <span>
-            {t(
-              "Made for the grown-ups who help little hearts feel understood.",
-            )}
-          </span>
-          <Link href="/privacy">{t("Privacy note")}</Link>
-          <Link href="/terms">{t("Terms")}</Link>
-        </footer>
+        {!childReading && (
+          <footer>
+            <span>
+              {t(
+                "Made for the grown-ups who help little hearts feel understood.",
+              )}
+            </span>
+            <Link href="/privacy">{t("Privacy note")}</Link>
+            <Link href="/terms">{t("Terms")}</Link>
+          </footer>
+        )}
       </div>
     </div>
   );

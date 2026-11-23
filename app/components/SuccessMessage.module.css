@@ -1,0 +1,21 @@
+/* Pin the success message to the top of the viewport. */
+.message {
+  position: fixed;
+  top: calc(env(safe-area-inset-top, 0px) + 20px);
+  left: 50%;
+  z-index: 30;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: max-content;
+  max-width: calc(100vw - 32px);
+  padding: 10px 16px;
+  border: 1px solid #b7d7c1;
+  border-radius: 10px;
+  background: #edf8f0;
+  color: #24553a;
+  box-shadow: 0 4px 14px rgb(0 0 0 / 10%);
+  pointer-events: none;
+}
+.message svg { flex-shrink: 0; }

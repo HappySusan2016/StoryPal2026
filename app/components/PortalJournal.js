@@ -1,9 +1,12 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "../hooks/useTranslation";
 import { toMillis } from "../lib/portalData";
 import { DEFAULT_MODULES, getDefaultStoryTemplate } from "../lib/defaultModules";
+
+import DeleteConfirmDialog from "./DeleteConfirmDialog";
+import SuccessMessage from "./SuccessMessage";
 
 /** @module Reflection journal */
 export default function PortalJournal({
@@ -42,6 +45,38 @@ export default function PortalJournal({
     event.currentTarget.reset();
     setEditing(null);
   }
+  /** @module Journal entry deletion confirmation and feedback */
+  const deleteDialogRef = useRef(null);
+  const [entryToDelete, setEntryToDelete] = useState(null);
+  const [deletedEntryId, setDeletedEntryId] = useState(null);
+  const [deleteError, setDeleteError] = useState("");
+
+  useEffect(() => {
+    if (deletedEntryId === null) return;
+    const timeout = window.setTimeout(() => setDeletedEntryId(null), 3000);
+    return () => window.clearTimeout(timeout);
+  }, [deletedEntryId]);
+
+  function handleOpenDeleteDialog(id) {
+    setDeleteError("");
+    setEntryToDelete(id);
+    deleteDialogRef.current.open();
+  }
+
+  function handleConfirmDelete() {
+    if (entryToDelete === null) return;
+    try {
+      onDelete(entryToDelete);
+    } catch {
+      setDeleteError("Could not save changes. Please try again.");
+      return;
+    }
+    if (editing?.id === entryToDelete) setEditing(null);
+    setDeletedEntryId(entryToDelete);
+    deleteDialogRef.current.close();
+  }
+
+  /** @module Journal ratings */
   function renderRating(name, label, low, high) {
     return (
       <fieldset className="rating-field">
@@ -53,7 +88,7 @@ export default function PortalJournal({
                 type="radio"
                 name={name}
                 value={score}
-                defaultChecked={score === (editing?.[name] ?? (name === "childComfort" ? 2 : 3))}
+                defaultChecked={score === (editing?.[name] ?? 3)}
                 required
               />
               <span>{score}</span>
@@ -69,6 +104,18 @@ export default function PortalJournal({
   }
   return (
     <section className="card journal" id="journal">
+      <SuccessMessage
+        message={deletedEntryId !== null ? t("Reflection deleted successfully") : null}
+      />
+      <DeleteConfirmDialog
+        ref={deleteDialogRef}
+        title={t("Delete reflection")}
+        description={t("You are about to delete data. Please confirm whether to continue.")}
+        confirmLabel={t("Continue")}
+        error={deleteError ? t(deleteError) : ""}
+        onConfirm={handleConfirmDelete}
+        onClose={() => setEntryToDelete(null)}
+      />
       <div className="section-label">{t("FOR GROWN-UPS")}</div>
       <h2>{t("Reflection journal")}</h2>
       <p>
@@ -217,10 +264,7 @@ export default function PortalJournal({
                         </button>{" "}
                         <button
                           className="link-btn"
-                          onClick={() => {
-                            onDelete(entry.id);
-                            if (editing?.id === entry.id) setEditing(null);
-                          }}
+                          onClick={() => handleOpenDeleteDialog(entry.id)}
                         >
                           {t("Delete")}
                         </button>

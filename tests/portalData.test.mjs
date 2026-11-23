@@ -213,7 +213,7 @@ test("按创建时间倒序展示绘本，兼容缓存时间戳且保留源数�
   assert.deepEqual(stories.map(story => story.id), ["old", "missing", "new", "same-time"]);
 });
 
-test("旧账号的每个已有孩子补齐三本独立默认绘本，公共示例不作为有效关联", () => {
+test("按孩子计算缺少的默认绘本，公共示例不作为有效关联", () => {
   const passports = [{ id: "a" }, { id: "b" }];
   const missing = getMissingDefaultModules(DEFAULT_MODULES, passports, "2026-11-17T00:00:00Z");
   assert.equal(missing.length, 6);
@@ -224,7 +224,7 @@ test("旧账号的每个已有孩子补齐三本独立默认绘本，公共示�
   assert.deepEqual(getProfileStories([...DEFAULT_MODULES, ...missing], passports), missing);
 });
 
-test("保留已编辑和旧 ID 关联的默认绘本，只补缺失项；删除后下次加载补回", () => {
+test("计算缺失绘本时保留已编辑和旧 ID 关联的默认绘本", () => {
   const passports = [{ id: "a" }];
   const defaults = createDefaultModules("a");
   defaults[0].steps[0].message = "My edited message";

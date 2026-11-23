@@ -216,12 +216,6 @@ export function PortalLanding({ onSignedIn }) {
             )}
           </span>
           <span>{t("♡ &nbsp;Gentle by design").replaceAll("&nbsp;", " ")}</span>
-          <span>
-            {t("☁ &nbsp;Nothing leaves this computer").replaceAll(
-              "&nbsp;",
-              " ",
-            )}
-          </span>
         </div>
       </section>
       <PortalAuth signup onSignedIn={onSignedIn} />
