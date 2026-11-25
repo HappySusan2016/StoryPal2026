@@ -13,6 +13,10 @@ import { getMissingDefaultModules } from "../lib/defaultModules";
 import PortalJournal from "./PortalJournal";
 
 import StoryModules from "./StoryModules";
+import StoryWorkshop from "./StoryWorkshop";
+import workshopStyles from "./StoryWorkshop.module.css";
+import { defaultStoryPronouns, getStoryGenerationKey } from "../lib/storyWorkshop";
+import { saveWorkshopChild } from "../lib/workshopSelection";
 import { useTranslation } from "../hooks/useTranslation";
 import { auth, db } from "../lib/firebaseClient";
 import { onAuthStateChanged, signOut } from "firebase/auth";
@@ -20,6 +24,7 @@ import {
   collection,
   deleteDoc,
   doc,
+  getDocFromServer,
   getDocs,
   getDocsFromServer,
   query,
@@ -30,9 +35,7 @@ import {
   where,
   writeBatch,
 } from "firebase/firestore";
-import { AlertTriangle, Check, LoaderCircle, RotateCcw } from "lucide-react";
 import { awardReadingStars, saveReadingPage } from "../lib/readingSessions";
-import { generateModuleGuides } from "../lib/parentGuides";
 
 /** @module Legacy cache compatibility */
 const STORAGE_KEY = "storypal.modules";
@@ -42,6 +45,40 @@ const STORY_DRAFT_KEY = "storypal.story-draft";
 
 function scopedKey(base, uid) {
   return uid ? `${base}.${uid}` : base;
+}
+
+/** @module Story drafts for the current tab */
+function workshopDraftKey(uid, draftId) {
+  return `${scopedKey(STORY_DRAFT_KEY, uid)}.${draftId}`;
+}
+
+function getWorkshopDraft(uid, draftId) {
+  if (!uid || !draftId) return null;
+  try {
+    const draft = JSON.parse(sessionStorage.getItem(workshopDraftKey(uid, draftId))
+      ?? sessionStorage.getItem(scopedKey(STORY_DRAFT_KEY, uid)));
+    return draft?.draftId === draftId && typeof draft.title === "string" ? draft : null;
+  } catch {
+    return null;
+  }
+}
+
+function getWorkshopEdits(key) {
+  if (!key) return null;
+  try {
+    return JSON.parse(sessionStorage.getItem(key));
+  } catch {
+    return null;
+  }
+}
+
+function clearWorkshopEdits(key) {
+  if (!key) return;
+  try {
+    sessionStorage.removeItem(key);
+  } catch {
+    // Continue navigation if local draft cleanup fails after a successful cloud save.
+  }
 }
 
 function loadModulesFromStorage(uid) {
@@ -299,10 +336,8 @@ export default function ParentPortal({ initialProfileId = null, storyEditor = nu
         age: p.age || "",
         avatar: p.avatar || "",
         pronouns: {
-          subject: p.pronouns?.subject || "",
-          object: p.pronouns?.object || "",
-          possessiveAdjective: p.pronouns?.possessiveAdjective || "",
-          possessivePronoun: p.pronouns?.possessivePronoun || "",
+          ...Object.fromEntries(Object.entries(defaultStoryPronouns).map(([field, fallback]) =>
+            [field, p.pronouns?.[field]?.trim() || fallback])),
         },
       },
       communication: {
@@ -346,54 +381,22 @@ export default function ParentPortal({ initialProfileId = null, storyEditor = nu
     saveModulesToStorage(next, currentUser?.uid);
   }
 
-  /** @module Parent guide generation on save */
+  /** @module Story save state */
   const [savingModule, setSavingModule] = useState(false);
   const savingModuleRef = useRef(false);
-  const [guideProgress, setGuideProgress] = useState(null);
-  const [guideFailure, setGuideFailure] = useState(null);
-  const guideDecisionRef = useRef(null);
 
-  /** Show failed steps and let the user save partial results or retry those steps. */
-  function handleGuideFailure(failure) {
-    setGuideFailure(failure);
-    return new Promise((resolve) => {
-      guideDecisionRef.current = resolve;
-    });
-  }
-
-  /** @module Recovery options for guide generation failures */
-  function handleGuideDecision(savePartial) {
-    const resolve = guideDecisionRef.current;
-    guideDecisionRef.current = null;
-    setGuideFailure(null);
-    resolve?.(savePartial);
-  }
-
-  async function handleModuleSave(moduleDefinition, initialSteps) {
+  async function handleModuleSave(moduleDefinition) {
     if (savingModuleRef.current) return;
     savingModuleRef.current = true;
     setSavingModule(true);
     try {
-      const passport = passports.find(
-        (item) => item.id === moduleDefinition.childId,
-      );
-      const steps = await generateModuleGuides(
-        moduleDefinition,
-        storyEditor.storyId ? initialSteps : [],
-        passport ? buildContextFromPassport(passport) : {},
-        { onProgress: setGuideProgress, onFailure: handleGuideFailure },
-      );
-      await persistModule({ ...moduleDefinition, steps });
+      await persistModule(moduleDefinition);
     } catch (error) {
       console.error("Failed to save story", error);
-      window.alert(
-        t("Story could not be saved. Your edits are still available. Please try again."),
-      );
+      window.alert(t("Story could not be saved. Your edits are still available. Please try again."));
     } finally {
       savingModuleRef.current = false;
       setSavingModule(false);
-      setGuideProgress(null);
-      setGuideFailure(null);
     }
   }
 
@@ -402,15 +405,30 @@ export default function ParentPortal({ initialProfileId = null, storyEditor = nu
   const existingStory = storyPage?.storyId
     ? modules.find((story) => story.id === storyPage.storyId)
     : null;
-  const storyPassport = passports.find((passport) =>
-    passport.id === (existingStory?.childId ?? storyEditor?.childId));
   const childReader = storyReader?.childMode === true;
+  const workshopStory = useRef(null);
+  const draft = getWorkshopDraft(currentUser?.uid, storyEditor?.draftId);
+  const draftStorageKey = draft?.generation?.storyId
+    ? `${workshopDraftKey(currentUser.uid, draft.draftId)}.edits.${draft.generation.storyId}` : "";
+  const unsavedWorkshopEdits = getWorkshopEdits(draftStorageKey);
+  const hasPendingWorkshopStory = Boolean(draft?.generation
+    && (draft.generation.awaitingEditorSave !== false || unsavedWorkshopEdits));
+  const workshopReturn = Boolean(storyEditor?.storyId && draft?.generation?.storyId === storyEditor.storyId);
+  const pendingStory = workshopReturn && !existingStory ? draft.generation.story : null;
+  const storyPassport = passports.find((passport) =>
+    passport.id === (existingStory?.childId ?? pendingStory?.childId ?? storyEditor?.childId));
+  const workshopHref = workshopReturn ? `/stories/new?${new URLSearchParams({
+    child: draft.childId,
+    draft: draft.draftId,
+    ...(draft.fromProfile && { from: "profile" }),
+  })}` : null;
   const bookshelfHref = childReader && storyReader.bookshelfProfile !== null
     ? `/child?profile=${encodeURIComponent(storyReader.bookshelfProfile)}`
     : "/child";
-  const storyBackHref = childReader ? bookshelfHref : storyPage?.fromProfile && storyPassport
+  const storyOriginHref = storyPage?.fromProfile && storyPassport
     ? `/profiles/${encodeURIComponent(storyPassport.id)}`
     : "/";
+  const storyBackHref = workshopHref || (childReader ? bookshelfHref : storyOriginHref);
 
   /** @module Child reading progress and rewards */
   function handleChildPageConfirmed(pageIndex, completed) {
@@ -440,28 +458,46 @@ export default function ParentPortal({ initialProfileId = null, storyEditor = nu
     setReadingSaveError(false);
   }
 
-  function getNewStoryTitle() {
-    if (!storyEditor.draftId) return "";
-    try {
-      const draft = JSON.parse(sessionStorage.getItem(scopedKey(STORY_DRAFT_KEY, currentUser.uid)));
-      return draft?.draftId === storyEditor.draftId && typeof draft.title === "string" ? draft.title : "";
-    } catch {
-      // If session storage is unavailable, enter the title in the editor.
-      return "";
-    }
-  }
-
   /** @module Storybook persistence */
   async function persistModule(moduleDefinition) {
     const uid = currentUser?.uid;
+    if (!uid || auth.currentUser?.uid !== uid) throw new Error(t("Please sign in again."));
     const storyRef = doc(db, "users", uid, "modules", moduleDefinition.id);
     const updatedAt = new Date().toISOString();
     const changes = { ...moduleDefinition, updatedAt: serverTimestamp() };
     // Update only editable fields to preserve the creation time and avoid recreating deleted records.
-    if (existingStory) {
+    if (pendingStory) {
+      if (!moduleDefinition.childId) throw new Error(t("Profile not found."));
+      const passportRef = doc(db, "users", uid, "passports", moduleDefinition.childId);
+      await runTransaction(db, async (transaction) => {
+        const saved = await transaction.get(storyRef);
+        if (saved.exists()) throw new Error(t("Could not save changes. Please try again."));
+        const passport = await transaction.get(passportRef);
+        if (!passport.exists()) throw new Error(t("Profile not found."));
+        transaction.set(storyRef, { ...changes, createdAt: updatedAt });
+      });
+    } else if (existingStory) {
       await updateDoc(storyRef, changes);
     } else {
       await setDoc(storyRef, { ...changes, createdAt: updatedAt });
+    }
+    // Expand the child associated with the saved story when returning home.
+    if (storyOriginHref === "/") saveWorkshopChild(uid, moduleDefinition.childId);
+    if (workshopReturn) {
+      clearWorkshopEdits(draftStorageKey);
+      try {
+        // Clear local content after saving to the cloud, keeping only the generation record needed to reopen the story.
+        const currentDraft = getWorkshopDraft(uid, draft.draftId);
+        if (currentDraft?.generation?.storyId === moduleDefinition.id) {
+          const generation = { ...currentDraft.generation, awaitingEditorSave: false };
+          delete generation.story;
+          sessionStorage.setItem(workshopDraftKey(uid, draft.draftId), JSON.stringify({
+            ...currentDraft, generation,
+          }));
+        }
+      } catch {
+        // Continue navigation if the session record fails to save after a successful cloud save.
+      }
     }
     const savedStory = {
       ...(existingStory || { createdAt: updatedAt }),
@@ -478,17 +514,73 @@ export default function ParentPortal({ initialProfileId = null, storyEditor = nu
       // Return to the list even if the cache write fails after the cloud save.
       console.error("Failed to cache story", error);
     }
-    router.replace(storyBackHref);
+    router.replace(storyOriginHref);
   }
 
-  /** @module Open the reading page from the list */
-  function handleModuleRead(story) {
-    const href = `/stories/${encodeURIComponent(story.id)}`;
-    router.push(initialProfileId ? `${href}?from=profile` : href);
+  /** @module Full AI story generation and save retries */
+  function openWorkshopEditor(storyId) {
+    const params = new URLSearchParams({ draft: draft.draftId });
+    if (storyEditor.fromProfile) params.set("from", "profile");
+    router.push(`/stories/${encodeURIComponent(storyId)}/edit?${params}`);
   }
 
-  /** @module Open the editor from the list */
+  async function handleWorkshopGenerate(input, focusTouched, replaceEdits) {
+    const user = currentUser;
+    const title = draft?.title.trim();
+    if (!title || !user || auth.currentUser?.uid !== user.uid) {
+      throw new Error(t("Could not save changes. Please try again."));
+    }
+    const key = getStoryGenerationKey(title, input);
+    const previous = draft.generation;
+    const replacedStoryId = replaceEdits ? previous?.storyId : undefined;
+    if (!replaceEdits && previous?.key === key) {
+      const alreadyLoaded = previous.story || modules.some(({ id }) => id === previous.storyId);
+      if (alreadyLoaded || (await getDocFromServer(doc(db, "users", user.uid, "modules", previous.storyId))).exists()) {
+        if (auth.currentUser?.uid !== user.uid) throw new Error(t("Please sign in again."));
+        openWorkshopEditor(previous.storyId);
+        return;
+      }
+    }
+    if (workshopStory.current?.key !== key || workshopStory.current?.uid !== user.uid
+      || workshopStory.current?.replacedStoryId !== replacedStoryId) {
+      const response = await fetch("/api/generate-story", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${await user.getIdToken()}` },
+        body: JSON.stringify(input),
+      });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.reason || result.error || "Could not generate the story. Please try again.");
+      workshopStory.current = {
+        key,
+        uid: user.uid,
+        replacedStoryId,
+        story: {
+          id: `ai-${crypto.randomUUID()}`,
+          childId: input.childId,
+          title,
+          coverImage: "/default-story-cover.svg",
+          fontPreset: "classic",
+          steps: result.steps,
+        },
+      };
+    }
+    if (auth.currentUser?.uid !== user.uid) throw new Error(t("Please sign in again."));
+    // Keep the generated story in the tab until the user explicitly saves it to the cloud from the editor.
+    const { story } = workshopStory.current;
+    sessionStorage.setItem(workshopDraftKey(user.uid, draft.draftId), JSON.stringify({
+      ...draft,
+      childId: draft.childId || storyEditor.childId,
+      fromProfile: storyEditor.fromProfile,
+      generation: { key, storyId: story.id, input, focusTouched, awaitingEditorSave: true, story },
+    }));
+    if (replaceEdits) clearWorkshopEdits(draftStorageKey);
+    openWorkshopEditor(story.id);
+  }
+
+  /** @module Opening the editor from the story list */
   function handleModuleEdit(story) {
+    // Remember which child owns the story before leaving home so its section reopens on return or browser Back.
+    if (!initialProfileId) saveWorkshopChild(currentUser?.uid, story.childId);
     const href = `/stories/${encodeURIComponent(story.id)}/edit`;
     router.push(initialProfileId ? `${href}?from=profile` : href);
   }
@@ -501,13 +593,16 @@ export default function ParentPortal({ initialProfileId = null, storyEditor = nu
       // The title may contain personal information, so pass it through this tab's session storage.
       try {
         const draftId = crypto.randomUUID();
-        sessionStorage.setItem(scopedKey(STORY_DRAFT_KEY, currentUser.uid), JSON.stringify({ draftId, title }));
+        sessionStorage.setItem(workshopDraftKey(currentUser.uid, draftId), JSON.stringify({
+          draftId, title, childId, fromProfile: Boolean(initialProfileId),
+        }));
         params.set("draft", draftId);
       } catch {
         window.alert(t("Could not save changes. Please try again."));
         return;
       }
     }
+    if (!initialProfileId) saveWorkshopChild(currentUser?.uid, childId);
     router.push(`/stories/new?${params}`);
   }
 
@@ -517,7 +612,9 @@ export default function ParentPortal({ initialProfileId = null, storyEditor = nu
     const accountRef = doc(db, "users", uid);
     const passportsRef = collection(accountRef, "passports");
     const passportRef = doc(passportsRef, passport.id);
-    const defaults = await runTransaction(db, async (transaction) => {
+    // Keep the creation time stable across transaction retries and later edits.
+    const newCreatedAt = new Date().toISOString();
+    const { defaults, createdAt } = await runTransaction(db, async (transaction) => {
       // All profile saves read and write the same account document so concurrent saves across tabs recheck the latest profile list.
       await transaction.get(accountRef);
       const existing = await transaction.get(passportRef);
@@ -546,13 +643,15 @@ export default function ParentPortal({ initialProfileId = null, storyEditor = nu
         });
       }
 
+      const createdAt = existing.exists() ? existing.data().createdAt : newCreatedAt;
       transaction.set(accountRef, { passportsUpdatedAt: serverTimestamp() }, { merge: true });
       transaction.set(passportRef, {
         ...passport,
+        ...(createdAt != null && { createdAt }),
         updatedAt: serverTimestamp(),
         ...(initializeStories && { defaultStoriesInitializedAt: serverTimestamp() }),
       }, { merge: true });
-      return stories;
+      return { defaults: stories, createdAt };
     });
     if (defaults.length) {
       const newIds = new Set(defaults.map(story => story.id));
@@ -560,9 +659,10 @@ export default function ParentPortal({ initialProfileId = null, storyEditor = nu
       setModules(nextModules);
       saveModulesToStorage(nextModules, currentUser.uid);
     }
+    const savedPassport = { ...passport, ...(createdAt != null && { createdAt }) };
     const next = passports.some((p) => p.id === passport.id)
-      ? passports.map((p) => (p.id === passport.id ? passport : p))
-      : [...passports, passport];
+      ? passports.map((p) => (p.id === passport.id ? savedPassport : p))
+      : [...passports, savedPassport];
     setPassports(next);
     savePassportsToStorage(next, currentUser.uid);
   }
@@ -610,131 +710,44 @@ export default function ParentPortal({ initialProfileId = null, storyEditor = nu
       </PortalShell>
     );
 
-  /** @module Progress saving and parent guide retries */
-  const guideStatus = savingModule && (
-    <div
-      className={`sticky top-0 z-10 mb-5 rounded-2xl border p-4 shadow-sm sm:p-5 ${guideFailure ? "border-amber-200 bg-amber-50" : "border-purple-200 bg-purple-50"}`}
-    >
-      <div className="flex items-start gap-3 sm:gap-4">
-        <div
-          className={`flex size-10 shrink-0 items-center justify-center rounded-xl border bg-white ${guideFailure ? "border-amber-200 text-amber-700" : "border-purple-200 text-[#315e4a]"}`}
-        >
-          {guideFailure ? (
-            <AlertTriangle className="size-5" aria-hidden="true" />
-          ) : (
-            <LoaderCircle
-              className="size-5 motion-safe:animate-spin"
-              aria-hidden="true"
-            />
-          )}
-        </div>
-        <div className="min-w-0 flex-1">
-          {guideFailure ? (
-            <>
-              <div role="alert" className="space-y-1">
-                <h3 className="text-sm font-semibold leading-6 text-amber-950">
-                  {guideFailure.timedOut
-                    ? t("Guide generation timed out.")
-                    : t("Some parent guides could not be generated.")}
-                </h3>
-                <p className="text-sm leading-6 text-amber-900">{t("Your edits and successful guides are retained.")}</p>
-                <p className="flex flex-wrap items-center gap-2 pt-2 text-xs font-medium text-amber-900">
-                  <span>{t("Steps to retry:")}</span>
-                  {guideFailure.failedSteps.map((step) => (
-                    <span
-                      key={step}
-                      className="inline-flex min-w-7 items-center justify-center rounded-lg border border-amber-200 bg-white px-2 py-1 tabular-nums"
-                    >
-                      {step}
-                    </span>
-                  ))}
-                </p>
-              </div>
-              <div className="mt-4 flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:gap-3">
-                <button
-                  type="button"
-                  onClick={() => handleGuideDecision(true)}
-                  className="story-editor-button is-primary"
-                >
-                  <Check className="size-4" aria-hidden="true" />{t("Save existing results")}</button>
-                <button
-                  type="button"
-                  onClick={() => handleGuideDecision(false)}
-                  className="story-editor-button"
-                >
-                  <RotateCcw
-                    className="size-4"
-                    aria-hidden="true"
-                  />{t("Retry failed steps")}</button>
-              </div>
-            </>
-          ) : (
-            <>
-              <div
-                role="status"
-                aria-atomic="true"
-                className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1"
-              >
-                <h3 className="text-sm font-semibold leading-6 text-[#315e4a]">
-                  {guideProgress
-                    ? t("Processing parent guides")
-                    : t("Preparing parent guides…")}
-                </h3>
-                {guideProgress && (
-                  <span className="rounded-lg border border-purple-200 bg-white px-2.5 py-1 text-xs font-semibold tabular-nums text-[#315e4a]">
-                    {guideProgress.completed} /{" "}
-                    {guideProgress.total}
-                  </span>
-                )}
-              </div>
-              {guideProgress && guideProgress.total > 0 && (
-                <progress
-                  aria-label={t("Parent guide processing progress")}
-                  value={guideProgress.completed}
-                  max={guideProgress.total}
-                  className="mt-3 block h-2 w-full overflow-hidden rounded-full border-0 bg-purple-100 [&::-webkit-progress-bar]:rounded-full [&::-webkit-progress-bar]:bg-purple-100 [&::-webkit-progress-value]:rounded-full [&::-webkit-progress-value]:bg-[#315e4a] [&::-moz-progress-bar]:rounded-full [&::-moz-progress-bar]:bg-[#315e4a]"
-                />
-              )}
-            </>
-          )}
-        </div>
-      </div>
-    </div>
-  );
-
   /** @module Shared layout for reading, creating, and editing storybooks */
   if (storyPage) {
-    const backLabel = storyPage.fromProfile && storyPassport
+    const backLabel = workshopReturn ? t("← Back to story workshop") : storyPage.fromProfile && storyPassport
       ? `← ${t("Back to {nickname}", { nickname: storyPassport.childName })}`
       : t("← Back to your space");
     const isEditing = Boolean(storyEditor?.storyId);
+    const workshopTitle = draft?.title || "";
+    const showWorkshop = !isEditing && Boolean(workshopTitle);
     const readerContext = storyReader ? buildContextFromPassport(storyPassport) : null;
     const title = storyReader
       ? interpolateStoryText(existingStory?.title, readerContext) || t("Read")
       : t(isEditing ? "Edit story" : "Create story");
     const storyError = storyPage.storyId
-      ? (!existingStory || (childReader && !storyPassport)) && (dataError || "Story not found.")
-      : !storyPassport && (storyEditor.childId
+      ? ((!existingStory && !pendingStory) || (childReader && !storyPassport)) && (dataError || "Story not found.")
+      : storyEditor.draftId && !workshopTitle
+        ? "This story title is unavailable. Return to your space to start again."
+        : !storyPassport && (storyEditor.childId
         ? "Profile not found."
         : !passports.length && "Create a communication passport to personalize stories for your child.");
 
+    const showEditor = !storyReader && !showWorkshop && !modulesLoading && !storyError;
     const heading = (
       <div>
         {!childReader && (savingModule ? (
           <span className="story-editor-back" aria-disabled="true">{backLabel}</span>
         ) : (
-          <Link className="story-editor-back" href={storyBackHref}>{backLabel}</Link>
+          <Link className="story-editor-back" href={storyBackHref} replace={Boolean(workshopReturn)}>{backLabel}</Link>
         ))}
-        <h1>{title}</h1>
-        {storyPassport && <p className="muted">{storyPassport.childName}</p>}
+        {!showEditor && <h1>{title}</h1>}
+        {!showEditor && storyPassport && <p className="muted">{storyPassport.childName}</p>}
       </div>
     );
     const showReader = storyReader && !modulesLoading && !storyError;
 
     return (
       <PortalShell childReading={childReader}>
-        <main className={`reader-shell story-editor-page${storyReader ? " story-reading-page" : ""}`}>
-          {!showReader && <header className="reader-top">{heading}</header>}
+        <main className={`reader-shell story-editor-page${storyReader ? " story-reading-page" : ""}${showWorkshop ? ` ${workshopStyles.page}` : ""}`}>
+          {!showReader && (!showWorkshop || modulesLoading || storyError) && <header className="reader-top">{heading}</header>}
           {modulesLoading ? (
             <p role="status">{t("Loading…")}</p>
           ) : storyError ? (
@@ -758,17 +771,33 @@ export default function ParentPortal({ initialProfileId = null, storyEditor = nu
                     onReadAgain={childReader ? handleReadAgain : undefined}
                     onFinished={() => router.replace(storyBackHref)}
                   />
+                ) : showWorkshop ? (
+                  <StoryWorkshop
+                    key={currentUser.uid}
+                    passports={passports}
+                    initialChildId={storyPassport?.id}
+                    previousGeneration={draft.generation}
+                    hasPendingStory={hasPendingWorkshopStory}
+                    hasUnsavedEdits={Boolean(unsavedWorkshopEdits)}
+                    onKeepEdits={() => openWorkshopEditor(draft.generation.storyId)}
+                    getTemplateContext={buildContextFromPassport}
+                    onGenerate={handleWorkshopGenerate}
+                    title={workshopTitle}
+                    backHref={storyBackHref}
+                    backLabel={backLabel}
+                  />
                 ) : (
-                  <>
-                    {guideStatus}
-                    <StoryModules
-                      passports={passports}
-                      initialData={existingStory || { childId: storyPassport?.id, title: getNewStoryTitle() }}
-                      getTemplateContext={buildContextFromPassport}
-                      onSave={handleModuleSave}
-                      saving={savingModule}
-                    />
-                  </>
+                  <StoryModules
+                    passport={storyPassport}
+                    initialData={existingStory || pendingStory || { childId: storyPassport?.id }}
+                    isNewDraft={Boolean(pendingStory)}
+                    generationInput={workshopReturn ? draft.generation.input : undefined}
+                    unsavedEdits={workshopReturn ? unsavedWorkshopEdits : null}
+                    draftStorageKey={workshopReturn ? draftStorageKey : ""}
+                    getTemplateContext={buildContextFromPassport}
+                    onSave={handleModuleSave}
+                    saving={savingModule}
+                  />
                 )}
               </div>
             </>
@@ -782,6 +811,7 @@ export default function ParentPortal({ initialProfileId = null, storyEditor = nu
     <>
       <PortalShell>
         <PortalDashboard
+          key={currentUser?.uid}
           initialProfileId={initialProfileId}
           onSignOut={handleSignOut}
           user={currentUser}
@@ -793,7 +823,6 @@ export default function ParentPortal({ initialProfileId = null, storyEditor = nu
           onDeletePassport={handleDeletePassport}
           onCreate={handleCreateStory}
           onEdit={handleModuleEdit}
-          onRead={handleModuleRead}
           onDeleteStory={deleteModule}
           onTraining={() => setShowTraining(true)}
           journal={

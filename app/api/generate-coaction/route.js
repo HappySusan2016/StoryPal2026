@@ -9,7 +9,7 @@ export async function POST(req) {
   const timeoutSignal = AbortSignal.timeout(50000);
   const signal = AbortSignal.any([req.signal, timeoutSignal]);
   try {
-    const { stepType, stepMessage, storyTitle, childContext } = await req.json();
+    const { stepType, stepMessage, storyTitle, childContext, englishOnly } = await req.json();
 
     if (!stepType || !stepMessage) {
       return Response.json(
@@ -38,7 +38,7 @@ Guidelines:
 - Focus on engagement, validation, and patience
 - Use warm, encouraging language
 - Consider the child's potential communication challenges
-- Provide concrete examples of what parents can say or do
+- Provide concrete examples of what parents can say or do${englishOnly === true ? "\n- Write every field in English." : ""}
 
 Return ONLY a JSON object with these fields:
 {

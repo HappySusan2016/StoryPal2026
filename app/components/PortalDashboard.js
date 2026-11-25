@@ -4,14 +4,15 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "../hooks/useTranslation";
-import { toMillis } from "../lib/portalData";
+import { getNewestProfiles, toMillis } from "../lib/portalData";
 import { getDefaultStoryTemplate } from "../lib/defaultModules";
 import { subscribeToReadingPageCounts } from "../lib/readingSessions";
+import { clearWorkshopChild, getWorkshopChild } from "../lib/workshopSelection";
 
 import DeleteConfirmDialog from "./DeleteConfirmDialog";
 import PassportFields from "./PassportFields";
 import SuccessMessage from "./SuccessMessage";
-import { hasDuplicateChildName, updatePassportFromForm } from "../lib/passportFields";
+import { hasDuplicateChildName, passportGroups, updatePassportFromForm } from "../lib/passportFields";
 
 /** @module Parent dashboard and child profile details */
 export default function PortalDashboard({
@@ -26,7 +27,6 @@ export default function PortalDashboard({
   onDeletePassport,
   onCreate,
   onEdit,
-  onRead,
   onDeleteStory,
   onTraining,
   journal,
@@ -39,8 +39,33 @@ export default function PortalDashboard({
   const [passportError, setPassportError] = useState("");
   const profile = passports.find((p) => p.id === profileId);
 
-  /** @module Dashboard page counts aggregated across the current account's existing profiles */
   const uid = user?.uid;
+
+  /** @module Expanded child sections in the Story Workshop */
+  const orderedPassports = profileId ? passports : getNewestProfiles(passports);
+  const [returnChildId] = useState(() => profileId ? null : getWorkshopChild(uid));
+  const [expansionByChild, setExpansionByChild] = useState(() => new Map());
+  // Expand the child associated with a story being created or edited, or default to the first child in sorted order.
+  const defaultExpandedChildId = orderedPassports.find(({ id }) => id === returnChildId)?.id
+    ?? orderedPassports[0]?.id;
+
+  useEffect(() => {
+    if (!profileId) clearWorkshopChild(uid);
+  }, [profileId, uid]);
+
+  // Toggle each child's section independently.
+  function isWorkshopChildExpanded(childId) {
+    return expansionByChild.get(childId) ?? childId === defaultExpandedChildId;
+  }
+
+  function handleToggleWorkshopChild(childId) {
+    setExpansionByChild((previous) => {
+      const expanded = previous.get(childId) ?? childId === defaultExpandedChildId;
+      return new Map(previous).set(childId, !expanded);
+    });
+  }
+
+  /** @module Dashboard page counts aggregated across the current account's existing profiles */
   const [readingPageCounts, setReadingPageCounts] = useState(null);
   useEffect(() => {
     if (!uid || profileId) return;
@@ -89,13 +114,23 @@ export default function PortalDashboard({
     setSavedProfile(null);
     const data = new FormData(form);
     const next = updatePassportFromForm(existing, data, crypto.randomUUID());
-    // Validate the trimmed name and optional age before creating the profile.
+    // Validate the name on the home page and the trimmed age in both forms.
     if (!existing && !next.childName) {
       setPassportError("Enter a child name.");
       return;
     }
-    if (!existing && !/^[0-9]*$/.test(next.age)) {
+    if (!next.age) {
+      setPassportError("Enter an age.");
+      return;
+    }
+    if (!existing && !/^[0-9]+$/.test(next.age)) {
       setPassportError("Enter digits only for age.");
+      return;
+    }
+    // Require at least one visible communication method on the details page.
+    if (existing && !data.has("modalities")) {
+      setPassportError("Select at least one communication modality.");
+      form.querySelector('input[name="modalities"]')?.focus();
       return;
     }
     // Check the loaded profile list first so the form can flag duplicate names immediately.
@@ -108,6 +143,17 @@ export default function PortalDashboard({
       if (!existing) {
         router.push(`/profiles/${next.id}`);
         return;
+      }
+      // Show the defaults saved successfully while retaining any input entered during the save.
+      for (const [group, , fields] of passportGroups) {
+        for (const [field] of fields) {
+          const name = `${group}.${field}`;
+          const input = form.elements.namedItem(name);
+          const submitted = data.get(name);
+          if (submitted !== null && !submitted.trim() && input?.value === submitted) {
+            input.value = next[group][field];
+          }
+        }
       }
       // Collapse the form sections after a successful save while preserving the inputs and their values.
       form.querySelectorAll("details[open]").forEach((section) => {
@@ -190,16 +236,14 @@ export default function PortalDashboard({
   }
 
   /** @module Storybook list */
-  function renderStories(stories, profileList = false) {
+  function renderStories(stories) {
     return stories.length ? (
       <ul className="story-list">
         {stories.map((story) => (
           <li key={story.id}>
             <span className="icon" aria-hidden="true">▶</span>
             <div className="meta">
-              <button className="story-title-button" type="button" onClick={() => false && onRead(story)}>
-                {story.title}
-              </button>
+              <strong className="story-title-button">{story.title}</strong>
               <span>
                 {toMillis(story.createdAt)
                   ? new Date(toMillis(story.createdAt)).toLocaleDateString(language)
@@ -207,11 +251,8 @@ export default function PortalDashboard({
               </span>
             </div>
             <div className="story-actions">
-              {profileList && (
-                <button className="secondary" type="button" onClick={() => onRead(story)}>{t("Read")}</button>
-              )}
               {/* The home workshop only opens built-in storybooks for reading. */}
-              {(profileList || !getDefaultStoryTemplate(story)) && <>
+              {!getDefaultStoryTemplate(story) && <>
                 <button className="secondary" type="button" onClick={() => onEdit(story)}>{t("Edit")}</button>
                 <button
                   className="secondary danger"
@@ -225,13 +266,7 @@ export default function PortalDashboard({
         ))}
       </ul>
     ) : (
-      <p className={profileList ? "empty-state" : "hint"}>
-        {t(
-          profileList
-            ? "No stories yet. Make the first one with the button above."
-            : "No stories yet. Make the first one above.",
-        )}
-      </p>
+      <p className="hint">{t("No stories yet. Make the first one above.")}</p>
     );
   }
   if (initialProfileId && loading)
@@ -318,26 +353,6 @@ export default function PortalDashboard({
               {renderDetails(profile)}
               <button className="primary" disabled={busy || loading}>{t("Save changes")}</button>
             </form>
-          </section>
-          <section className="card" style={{ marginTop: 22 }}>
-            <div className="section-head">
-              <div>
-                <div className="section-label">{t("STORIES")}</div>
-                <h2>
-                  {t("Stories for $nickname", { nickname: profile.childName })}
-                </h2>
-              </div>
-              <button
-                className="secondary"
-                onClick={() => onCreate(profile.id)}
-              >
-                + {t("New story")}
-              </button>
-            </div>
-            {renderStories(
-              modules.filter((m) => m.childId === profile.id),
-              true,
-            )}
           </section>
           <section className="card danger-zone" style={{ marginTop: 22 }}>
             <div className="section-label">{t("REMOVE PROFILE")}</div>
@@ -446,13 +461,13 @@ export default function PortalDashboard({
               </div>
               <p className="section-intro">
                 {t(
-                  "Choose a profile and enter a story title. Create or generate a story in the editor, then edit every page.",
+                  "Choose a profile and enter a story title. Set up your story, generate it with AI, then edit each page.",
                 )}
               </p>
               {loading ? (
                 <p role="status">{t("Loading…")}</p>
               ) : (
-                passports.map((p) => (
+                orderedPassports.map((p) => (
                   <article className="profile-card" key={p.id}>
                     <div className="profile-head">
 
@@ -477,10 +492,8 @@ export default function PortalDashboard({
                       className="story-form"
                       onSubmit={(e) => {
                         e.preventDefault();
-                        onCreate(
-                          p.id,
-                          new FormData(e.currentTarget).get("moment").trim(),
-                        );
+                        const title = new FormData(e.currentTarget).get("moment").trim();
+                        if (title) onCreate(p.id, title);
                       }}
                     >
                       <label htmlFor={`moment-${p.id}`}>
@@ -497,7 +510,19 @@ export default function PortalDashboard({
                         {t("Make a little story")} <span>→</span>
                       </button>
                     </form>
-                    {renderStories(modules.filter((m) => m.childId === p.id))}
+                    <button
+                      className="secondary workshop-stories-toggle"
+                      type="button"
+                      aria-expanded={isWorkshopChildExpanded(p.id)}
+                      aria-controls={`workshop-stories-${p.id}`}
+                      aria-label={`${t("Stories")} · ${p.childName}`}
+                      onClick={() => handleToggleWorkshopChild(p.id)}
+                    >
+                      {t("Stories")} <span aria-hidden="true">{isWorkshopChildExpanded(p.id) ? "▾" : "▸"}</span>
+                    </button>
+                    <div id={`workshop-stories-${p.id}`} hidden={!isWorkshopChildExpanded(p.id)}>
+                      {renderStories(modules.filter((m) => m.childId === p.id))}
+                    </div>
                   </article>
                 ))
               )}

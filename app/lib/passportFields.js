@@ -1,5 +1,5 @@
-/* Communication passport field definitions and form conversion. */
-// Each field specifies its name, label, placeholder, and example value to insert on focus.
+/* Child profile field definitions and form data conversion. */
+// Each field defines its name, label, placeholder, and default text for a blank submission, in that order.
 export const passportGroups = [
   [
     "pronouns",
@@ -62,13 +62,13 @@ export function hasDuplicateChildName(passport, passports, existing) {
   return passports.some(item => item.id !== passport.id && nameKey(item.childName) === name);
 }
 
-/** Merge the legacy form into an existing profile while preserving hidden fields and unrecognized communication methods. */
+/** Merge form data, filling defaults for submitted blank detail fields and preserving unsubmitted fields. */
 export function updatePassportFromForm(existing, data, id) {
   const next = { ...existing, id: existing?.id || id, childName: data.get("childName").trim(), age: data.get("age").trim() };
   for (const [group, , fields] of passportGroups) {
     next[group] = { ...existing?.[group] };
-    for (const [field] of fields) next[group][field] = data.has(`${group}.${field}`)
-      ? data.get(`${group}.${field}`).trim()
+    for (const [field, , , example] of fields) next[group][field] = data.has(`${group}.${field}`)
+      ? data.get(`${group}.${field}`).trim() || example
       : existing?.[group]?.[field] ?? "";
   }
   const knownModalities = ["AAC", "PECS", "Gestures", "Sign", "Verbal"];

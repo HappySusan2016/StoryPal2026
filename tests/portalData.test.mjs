@@ -13,6 +13,7 @@ const {
   updatePassportDetails,
   detachProfileFromStories,
   getProfileStories,
+  getNewestProfiles,
 } = await import(
   `data:text/javascript;base64,${Buffer.from(source).toString("base64")}`
 );
@@ -24,6 +25,18 @@ test("时间兼容 Firestore、缓存对象和 ISO 日期", () => {
   assert.equal(toMillis("2026-11-16T00:00:00Z"), time);
   assert.equal(toMillis(undefined), 0);
   assert.equal(toMillis("invalid"), 0);
+});
+
+test("儿童档案按创建时间倒序，编辑旧档案不会改变顺序", () => {
+  const passports = [
+    { id: "legacy", updatedAt: "2026-11-24" },
+    { id: "first", createdAt: "2026-11-20", updatedAt: "2026-11-24" },
+    { id: "legacy-2" },
+    { id: "latest", createdAt: { seconds: Date.parse("2026-11-23") / 1000 } },
+  ];
+
+  assert.deepEqual(getNewestProfiles(passports).map(({ id }) => id), ["latest", "first", "legacy", "legacy-2"]);
+  assert.equal(passports[0].id, "legacy");
 });
 
 test("基础字段编辑保留旧护照隐藏数据，允许清空可选字段", () => {
@@ -133,24 +146,30 @@ test("不同孩子的默认绘本和旧版 ID 映射到同一模板，同名自�
   assert.equal(getDefaultStoryTemplate({ ...first, id: "custom-story" }), undefined);
 });
 
-test("完整旧护照字段可以新增、更新和清空，头像与未知数据保留", () => {
+test("详情提交时空白字段使用默认文案，手填内容和历史数据保留", () => {
   const data = new FormData();
   data.set("childName", " Alex ");
   data.set("age", " 6 ");
   passportGroups.forEach(([group, , fields]) => fields.forEach(([field]) => data.set(`${group}.${field}`, "")));
   data.set("communication.latency", " 10 seconds ");
+  data.set("sensory.safeWordsCues", "   ");
   data.append("modalities", "AAC");
-  const existing = { id: "a", avatar: "bird", color: "blue", pronouns: { custom: "kept", subject: "they" }, communication: { modalities: ["Custom", "Verbal"] } };
+  const existing = { id: "a", avatar: "bird", color: "blue", pronouns: { custom: "kept", subject: "she" }, communication: { modalities: ["Custom", "Verbal"] } };
   const updated = updatePassportFromForm(existing, data, "unused");
   assert.equal(updated.id, "a");
   assert.equal(updated.avatar, "bird");
   assert.equal(updated.color, "blue");
   assert.equal(updated.childName, "Alex");
-  assert.equal(updated.pronouns.subject, "");
+  for (const [group, , fields] of passportGroups) {
+    for (const [field, , , example] of fields) {
+      if (group === "communication" && field === "latency") continue;
+      assert.equal(updated[group][field], example);
+    }
+  }
   assert.equal(updated.pronouns.custom, "kept");
   assert.equal(updated.communication.latency, "10 seconds");
   assert.deepEqual(updated.communication.modalities, ["Custom", "AAC"]);
-  assert.equal(existing.pronouns.subject, "they");
+  assert.equal(existing.pronouns.subject, "she");
   const created = updatePassportFromForm(null, data, "new");
   assert.equal(created.id, "new");
   assert.ok(!Object.hasOwn(created, "avatar"));

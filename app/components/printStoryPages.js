@@ -61,8 +61,8 @@ export async function printStoryPages(source, title) {
       .story-print-content p { font-size: calc(1.125rem * var(--story-print-text-scale)); overflow-wrap: anywhere; }
       .story-print-content input { font-size: calc(1rem * var(--story-print-text-scale)); }
       .story-print-content h3 { font-size: calc(40px * var(--story-print-text-scale)) !important; line-height: 1.2; font-weight: 800 !important; overflow-wrap: anywhere; }
-      .story-print-cover, .story-print-step-image { aspect-ratio: auto !important; }
-      .story-print-cover img, .story-print-step-image img { position: static !important; width: 100% !important; height: 100% !important; object-fit: contain !important; }
+      .story-print-cover { aspect-ratio: auto !important; }
+      .story-print-cover img { position: static !important; width: 100% !important; height: 100% !important; object-fit: contain !important; }
       input { pointer-events: none; }
     `;
     printDocument.head.appendChild(style);
@@ -97,26 +97,22 @@ export async function printStoryPages(source, title) {
       }),
     ]);
     clearTimeout(timeout);
-    // Images use the height remaining after text and choices. Always measure at the final paper size.
+    // Measure at the final paper size and reserve space for text and choices before setting the image height.
     storyPages.forEach((page, index) => {
       const viewport = page.querySelector('.story-print-viewport');
       const content = viewport.firstElementChild;
       const availableHeight = viewport.clientHeight - 2;
-      const images = Array.from(content.querySelectorAll('.story-print-cover, .story-print-step-image'));
-      images.forEach((image) => { image.style.display = 'none'; });
-      const textHeight = Math.max(content.offsetHeight, content.scrollHeight);
-      images.forEach((image) => { image.style.display = ''; });
-      const imageBudget = Math.max(0, Math.min(availableHeight * 0.6, availableHeight - textHeight - 8));
-      const preferredHeights = images.map((image) => {
+      const image = content.querySelector('.story-print-cover');
+      if (image) {
+        image.style.display = 'none';
+        const textHeight = Math.max(content.offsetHeight, content.scrollHeight);
+        image.style.display = '';
+        const imageBudget = Math.max(0, Math.min(availableHeight * 0.6, availableHeight - textHeight - 8));
         const picture = image.querySelector('img');
         const naturalHeight = picture ? image.clientWidth * picture.naturalHeight / picture.naturalWidth : image.clientWidth * 0.75;
-        return image.classList.contains('story-print-step-image') ? Math.min(naturalHeight, 216) : naturalHeight;
-      });
-      const preferredTotal = preferredHeights.reduce((total, height) => total + height, 0);
-      images.forEach((image, imageIndex) => {
-        const minimumHeight = Math.min(96, preferredHeights[imageIndex]);
-        image.style.height = `${Math.max(minimumHeight, preferredHeights[imageIndex] * Math.min(1, imageBudget / preferredTotal))}px`;
-      });
+        const minimumHeight = Math.min(96, naturalHeight);
+        image.style.height = `${Math.max(minimumHeight, Math.min(naturalHeight, imageBudget))}px`;
+      }
       // Check all descendants, including long choices. For oversized text, adjust font size while preserving the page box model.
       const getContentHeight = () => {
         const top = content.getBoundingClientRect().top;

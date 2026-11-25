@@ -1,9 +1,14 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
+import Image from "next/image";
 import { auth } from "../lib/firebaseClient";
-import { ArrowDown, ArrowUp, ChevronDown, Sparkles, X } from "lucide-react";
-import StoryPlayer from "./StoryPlayer";
+import { ArrowDown, ArrowUp, ImagePlus, Pencil, Sparkles, X } from "lucide-react";
+import StoryPlayer, { interpolateStoryText } from "./StoryPlayer";
+import StoryTextField from "./StoryTextField";
+import { hasManualParentGuide, isValidParentGuide } from "../lib/parentGuides";
+import { getStoryGoalDisplayText, getStorySetup, storyStages } from "../lib/storyWorkshop";
+import { encodeStoryImage, storyDraftByteLimit, storyImageAccept } from "../lib/storyEditorImage";
 import { useTranslation } from "../hooks/useTranslation";
 
 function createEmptyStep(stepType) {
@@ -28,82 +33,6 @@ function getStepTypeLabel(stepType) {
   if (stepType === "user-input") return "Child's input";
   if (stepType === "choice") return "Multiple choice";
   return stepType;
-}
-
-// Helper function to convert file to base64 data URL
-function fileToDataURL(file) {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(reader.result);
-    reader.onerror = reject;
-    reader.readAsDataURL(file);
-  });
-}
-
-// Available template variables for insertion
-const TEMPLATE_VARIABLES = [
-  { label: "Child's Name", value: "@child.name" },
-  { label: "Child's Age", value: "@child.age" },
-  { label: "Pronoun (they/he/she)", value: "@child.pronouns.subject" },
-  { label: "Pronoun (them/him/her)", value: "@child.pronouns.object" },
-  {
-    label: "Possessive (their/his/her)",
-    value: "@child.pronouns.possessiveAdjective",
-  },
-  {
-    label: "Possessive (theirs/his/hers)",
-    value: "@child.pronouns.possessivePronoun",
-  },
-];
-
-// Component for inserting template variables
-function VariableSelector({ onInsert }) {
-  const { t } = useTranslation();
-  const [isOpen, setIsOpen] = useState(false);
-
-  const handleSelect = (value) => {
-    onInsert(value);
-    setIsOpen(false);
-  };
-
-  return (
-    <div className="relative">
-      <button
-        type="button"
-        onClick={() => setIsOpen(!isOpen)}
-        className="story-editor-button"
-      >
-        <svg
-          xmlns="http://www.w3.org/2000/svg"
-          className="w-4 h-4"
-          viewBox="0 0 20 20"
-          fill="currentColor"
-        >
-          <path d="M5 3a2 2 0 00-2 2v2a2 2 0 002 2h2a2 2 0 002-2V5a2 2 0 00-2-2H5zM5 11a2 2 0 00-2 2v2a2 2 0 002 2h2a2 2 0 002-2v-2a2 2 0 00-2-2H5zM11 5a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V5zM11 13a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z" />
-        </svg>{t("Insert Variable")}</button>
-      {isOpen && (
-        <>
-          <div
-            className="fixed inset-0 z-10"
-            onClick={() => setIsOpen(false)}
-          />
-          <div className="absolute top-full left-0 mt-1 z-20 bg-white border border-zinc-200 rounded-lg shadow-lg py-1 min-w-[200px]">
-            {TEMPLATE_VARIABLES.map((variable) => (
-              <button
-                key={variable.value}
-                type="button"
-                onClick={() => handleSelect(variable.value)}
-                className="story-editor-menu-option"
-              >
-                <div className="font-medium">{t(variable.label)}</div>
-                <div className="text-xs text-zinc-500">{variable.value}</div>
-              </button>
-            ))}
-          </div>
-        </>
-      )}
-    </div>
-  );
 }
 
 function ensureStepIds(steps) {
@@ -138,192 +67,111 @@ function validateModule(moduleDef) {
   return true;
 }
 
+/** @module Story editor defaults and draft structure */
+const defaultCover = "/default-story-cover.svg";
+
+function getEditorDraft(story, steps) {
+  return {
+    title: story?.title || "",
+    coverImage: story?.coverImage || "",
+    childId: story?.childId || "",
+    steps,
+    stageDesign: story?.stageDesign ?? null,
+  };
+}
+
+/** @module Shared upload handler for covers and illustrations */
+function StoryImageUpload({ src, alt, cover = false, disabled, onUpload }) {
+  const { t } = useTranslation();
+  return (
+    <div className="story-image-frame" data-filled={Boolean(src)}>
+      {src && <Image src={src} alt={alt} fill sizes={cover ? "(max-width: 640px) 100vw, 240px" : "(max-width: 640px) 100vw, 320px"}
+        unoptimized />}
+      <label className="story-editor-button story-image-upload" aria-disabled={disabled || undefined}>
+        {src ? <Pencil size={16} aria-hidden="true" /> : <ImagePlus size={18} aria-hidden="true" />}
+        {t(src ? "Replace image" : "Upload Image")}
+        <input type="file" accept={storyImageAccept} className="sr-only" disabled={disabled}
+          aria-label={t(cover ? "Replace cover image" : src ? "Replace illustration" : "Upload illustration")}
+          onChange={(event) => {
+            const file = event.currentTarget.files?.[0];
+            event.currentTarget.value = "";
+            if (file) onUpload(file);
+          }} />
+      </label>
+    </div>
+  );
+}
+
 export default function StoryModules({
-  passports,
+  passport,
   onSave,
   getTemplateContext,
   initialData,
+  isNewDraft = false,
+  unsavedEdits,
+  draftStorageKey,
   saving = false,
+  generationInput,
 }) {
   const { t } = useTranslation();
-  const [aiGenerating, setAiGenerating] = useState(false);
-  const [aiError, setAiError] = useState("");
-  const [aiRetryAt, setAiRetryAt] = useState(0);
-  const [aiNow, setAiNow] = useState(0);
-  const [title, setTitle] = useState(initialData?.title || "");
-  const textareaRefs = useRef({});
-  const [coverImage, setCoverImage] = useState(initialData?.coverImage || "");
-  const [selectedPassportId, setSelectedPassportId] = useState(
-    initialData?.childId || ""
-  );
-  /** @module Initial editor snapshot */
+  /** @module Initial draft and editor state */
   const initialStepsRef = useRef(null);
   if (initialStepsRef.current === null) {
     initialStepsRef.current = ensureStepIds(initialData?.steps || []);
   }
-  const [steps, setSteps] = useState(initialStepsRef.current);
+  const [savedDraft] = useState(() => getEditorDraft(initialData, initialStepsRef.current));
+  const initialDraft = unsavedEdits || savedDraft;
+  const [title, setTitle] = useState(initialDraft.title);
+  const [view, setView] = useState("edit");
+  const [newType, setNewType] = useState("doctor");
+  const [newStage, setNewStage] = useState("immersion");
+  const [coverImage, setCoverImage] = useState(initialDraft.coverImage);
+  const childId = passport?.id || savedDraft.childId;
+  const stageDesign = initialDraft.stageDesign ?? savedDraft.stageDesign;
+  const [steps, setSteps] = useState(initialDraft.steps);
   const editingId = initialData?.id || null;
-  const [activeStage, setActiveStage] = useState(1);
+  const isUpdating = Boolean(editingId && !isNewDraft);
   const sceneFont = initialData?.fontPreset || "classic";
-  const [stageFraming, setStageFraming] = useState(
-    initialData?.stageDesign?.framing || {
-      focus: "greeting",
-      scenario: "school",
-      tone: "brave",
-      parentGoal: "",
-    }
-  );
-  const [stageImmersion, setStageImmersion] = useState(
-    initialData?.stageDesign?.immersion || {
-      feeling: "shy",
-      coplay: "wave",
-      imagery: "",
-    }
-  );
-  const [stageReflection, setStageReflection] = useState(
-    initialData?.stageDesign?.reflection || {
-      tried: "",
-      confidence: "Medium",
-      comfort: "Medium",
-    }
-  );
-  const [stageContinuity, setStageContinuity] = useState(
-    initialData?.stageDesign?.continuity || {
-      nextArc: "school-arc",
-      cadence: "Every 2 days",
-      badge: "bravery",
-    }
-  );
 
-  function buildStageContext() {
-    return {
-      framing: { ...stageFraming },
-      immersion: { ...stageImmersion },
-      reflection: { ...stageReflection },
-      continuity: { ...stageContinuity },
-    };
-  }
-
-  /** @module AI step generation and failure feedback */
-  async function generateStepsFromStages() {
-    setAiError("");
-    if (aiRetryAt && Date.now() < aiRetryAt) return;
-    setAiGenerating(true);
-    try {
-      const user = auth.currentUser;
-      if (!user) throw new Error("Please sign in to generate a step.");
-      const token = await user.getIdToken();
-      const res = await fetch("/api/generate-steps", {
-        // Allow 10 extra seconds for transport on the client so the button cannot stay disabled indefinitely.
-        signal: AbortSignal.timeout(60000),
-        method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-        body: JSON.stringify({
-          stages: buildStageContext(),
-          currentTitle: title || "",
-          // Provide recent steps so the model continues instead of re-starting
-          previousSteps: steps.slice(-6).map((s) => ({
-            type: s.type,
-            message: s.message,
-            placeholder: s.placeholder,
-            options: s.options,
-          })),
-        }),
-      });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        if (res.status === 401) throw new Error("Please sign in again.");
-        if (data.code === "STEP_QUOTA_EXCEEDED") {
-          throw new Error(`Daily AI quota (${data.limit}) is used or temporarily reserved. Try again later. Resets at ${new Intl.DateTimeFormat("en-US", { timeZone: "America/Chicago", dateStyle: "medium", timeStyle: "long" }).format(new Date(data.resetAt))} (US Central).`);
-        }
-        if (res.status === 429) {
-          const retrySeconds =
-            Number.isFinite(data?.retryAfterSeconds)
-              ? data.retryAfterSeconds
-              : 30;
-          const until = Date.now() + Math.max(1, retrySeconds) * 1000;
-          setAiRetryAt(until);
-          setAiNow(Date.now());
-          throw new Error(
-            `Rate limited. Try again in ${Math.max(1, retrySeconds)}s.`
-          );
-        }
-        const reason = res.status === 504
-          ? "AI generation timed out. Please try again."
-          : res.status === 502
-          ? "AI returned an invalid result. Please try again."
-          : res.status === 400
-          ? "AI service is not configured. Please contact the administrator."
-          : "AI service is unavailable. Please try again later.";
-        throw new Error(reason);
-      }
-
-      const incomingStep =
-        data?.step && typeof data.step === "object" ? data.step : null;
-      if (!incomingStep) throw new Error("No step returned.");
-
-      // The title remains editable during generation. Use the AI suggestion only if the current title is empty.
-      if (typeof data?.title === "string" && data.title.trim()) {
-        setTitle((currentTitle) => currentTitle.trim() ? currentTitle : data.title.trim());
-      }
-
-      setSteps((prev) => {
-        const s = incomingStep;
-        const base = createEmptyStep(s.type);
-        if (s.type === "doctor") {
-          return [
-            ...prev,
-            { ...base, message: s.message || "", imageUrl: s.imageUrl || "" },
-          ];
-        }
-        if (s.type === "user-input") {
-          return [
-            ...prev,
-            {
-              ...base,
-              message: s.message || "",
-              placeholder: s.placeholder || "",
-              imageUrl: s.imageUrl || "",
-            },
-          ];
-        }
-        // choice
-        return [
-          ...prev,
-          {
-            ...base,
-            message: s.message || "",
-            options: Array.isArray(s.options) ? s.options : [""],
-            imageUrl: s.imageUrl || "",
-          },
-        ];
-      });
-    } catch (e) {
-      // Show the cause of timeouts, network errors, and application failures, and re-enable controls in finally.
-      const reason = e?.name === "TimeoutError" || e?.name === "AbortError"
-        ? "Request timed out. Please try again."
-        : e instanceof TypeError
-        ? "Network connection failed. Check your connection and try again."
-        : e?.message || "Please try again.";
-      setAiError(`AI generation failed: ${reason}`);
-    } finally {
-      setAiGenerating(false);
-    }
-  }
-
+  /** @module Restore unsaved edits in the current tab */
+  const draftSnapshot = JSON.stringify({
+    title, coverImage, childId, steps, stageDesign,
+  });
+  const savedSnapshot = JSON.stringify(savedDraft);
   useEffect(() => {
-    if (!aiRetryAt) return;
-    if (Date.now() >= aiRetryAt) return;
-    const id = setInterval(() => setAiNow(Date.now()), 250);
-    return () => clearInterval(id);
-  }, [aiRetryAt]);
+    if (!draftStorageKey) return;
+    try {
+      if (draftSnapshot === savedSnapshot) sessionStorage.removeItem(draftStorageKey);
+      else sessionStorage.setItem(draftStorageKey, draftSnapshot);
+    } catch {
+      // The editor can still save to the cloud if session storage is unavailable.
+    }
+  }, [draftStorageKey, draftSnapshot, savedSnapshot]);
 
-  function addStep(stepType) {
-    setSteps((prev) => [...prev, createEmptyStep(stepType)]);
+  /** @module Story page management */
+  const deletedStepsByType = useRef(new Map());
+
+  function handleAddStep() {
+    // Restore the most recently deleted page of the same type, consuming each saved page only once.
+    const restoredStep = deletedStepsByType.current.get(newType)?.pop();
+    const step = { ...(restoredStep ?? createEmptyStep(newType)), stage: newStage };
+    if (!restoredStep && step.type === "choice") step.options = ["", ""];
+    setSteps((prev) => [...prev, step]);
   }
 
-  function deleteStep(stepId) {
-    setSteps((prev) => prev.filter((s) => s.id !== stepId));
+  function handleDeleteStep(step) {
+    // Keep only pages with entered or generated content so blank pages cannot replace earlier deleted pages.
+    const content = [
+      step.message, step.placeholder, step.imageUrl, step.imageDescription,
+      ...(step.options ?? []), ...(step.optionImageDescriptions ?? []),
+      step.parentGuide?.title, step.parentGuide?.description, step.parentGuide?.coActionPrompt,
+    ];
+    if (content.some((value) => typeof value === "string" && value.trim())) {
+      const deletedSteps = deletedStepsByType.current.get(step.type) ?? [];
+      deletedSteps.push(step);
+      deletedStepsByType.current.set(step.type, deletedSteps);
+    }
+    setSteps((prev) => prev.filter((s) => s.id !== step.id));
   }
 
   function moveStep(stepId, direction) {
@@ -345,50 +193,17 @@ export default function StoryModules({
     );
   }
 
-  function insertVariableAtCursor(stepId, field, variable) {
-    const element = textareaRefs.current[`${stepId}-${field}`];
-    if (!element) {
-      // If no element ref, just append to the end
-      setSteps((prev) => {
-        const step = prev.find((s) => s.id === stepId);
-        if (step) {
-          const currentValue = step[field] || "";
-          return prev.map((s) =>
-            s.id === stepId ? { ...s, [field]: currentValue + variable } : s
-          );
-        }
-        return prev;
-      });
-      return;
-    }
-
-    const start = element.selectionStart || 0;
-    const end = element.selectionEnd || 0;
-    const currentValue = element.value || "";
-    const newValue =
-      currentValue.slice(0, start) + variable + currentValue.slice(end);
-
-    setSteps((prev) =>
-      prev.map((s) => (s.id === stepId ? { ...s, [field]: newValue } : s))
-    );
-
-    // Restore cursor position after state update
-    setTimeout(() => {
-      element.focus();
-      const newCursorPos = start + variable.length;
-      if (element.setSelectionRange) {
-        element.setSelectionRange(newCursorPos, newCursorPos);
-      }
-    }, 0);
-  }
-
+  /** @module Sync choices with their illustration descriptions */
   function updateChoiceOption(stepId, optionIndex, value) {
     setSteps((prev) =>
       prev.map((s) => {
         if (s.id !== stepId) return s;
         const options = Array.isArray(s.options) ? [...s.options] : [];
+        if (options[optionIndex] === value) return s;
         options[optionIndex] = value;
-        return { ...s, options };
+        const optionImageDescriptions = s.optionImageDescriptions?.map((description, index) =>
+          index === optionIndex ? "" : description);
+        return { ...s, options, ...(optionImageDescriptions && { optionImageDescriptions }) };
       })
     );
   }
@@ -398,7 +213,8 @@ export default function StoryModules({
       prev.map((s) => {
         if (s.id !== stepId) return s;
         const options = Array.isArray(s.options) ? [...s.options, ""] : [""];
-        return { ...s, options };
+        const optionImageDescriptions = s.optionImageDescriptions && [...s.optionImageDescriptions, ""];
+        return { ...s, options, ...(optionImageDescriptions && { optionImageDescriptions }) };
       })
     );
   }
@@ -410,14 +226,14 @@ export default function StoryModules({
         const options = (Array.isArray(s.options) ? s.options : []).filter(
           (_, i) => i !== optionIndex
         );
-        return { ...s, options };
+        const optionImageDescriptions = s.optionImageDescriptions?.filter((_, i) => i !== optionIndex);
+        return { ...s, options, ...(optionImageDescriptions && { optionImageDescriptions }) };
       })
     );
   }
 
-  /** @module Draft editing and live preview */
-  // If a new storybook has no cover, use the prototype's default illustration for both preview and saving.
-  const resolvedCoverImage = coverImage.trim() || (editingId ? "" : "/default-story-cover.svg");
+  /** @module Story preview and save validation */
+  const resolvedCoverImage = coverImage.trim() || defaultCover;
   const previewStory = {
     id: editingId || "preview",
     title: title.trim() || t("Untitled Story"),
@@ -425,8 +241,75 @@ export default function StoryModules({
     steps,
     fontPreset: sceneFont,
   };
-  const selectedPassport = passports.find((passport) => passport.id === selectedPassportId);
-  const isValid = validateModule({ title, steps });
+  const templateContext = getTemplateContext(passport);
+  const setup = generationInput && getStorySetup(passport, generationInput.picks, generationInput.custom);
+  const changed = draftSnapshot !== savedSnapshot;
+  const initialById = new Map(initialStepsRef.current.map((step) => [step.id, step]));
+  const hasIncompleteGuide = steps.some((step) => hasManualParentGuide(step, initialById.get(step.id))
+    && !isValidParentGuide(step.parentGuide));
+  const exceedsBudget = draftSnapshot.length * 3 > storyDraftByteLimit
+    && new Blob([draftSnapshot]).size > Math.max(storyDraftByteLimit, new Blob([savedSnapshot]).size);
+  const isValid = validateModule({ title, steps }) && !hasIncompleteGuide && !exceedsBudget;
+
+  /** @module Shared compression for uploads and generation, with concurrent replacements and submissions blocked during processing */
+  const imageJobRef = useRef(null);
+  const [imageJob, setImageJob] = useState(null);
+  const [imageError, setImageError] = useState(null);
+
+  async function handleImageChange(stepId, loadImage, generating = false) {
+    if (imageJobRef.current || saving) return;
+    const job = { stepId, generating };
+    imageJobRef.current = job;
+    setImageJob(job);
+    setImageError(null);
+    try {
+      const image = await encodeStoryImage(await loadImage(), { cropToCoverRatio: generating });
+      if (stepId) updateStep(stepId, "imageUrl", image);
+      else setCoverImage(image);
+    } catch (error) {
+      const message = error.name === "TimeoutError" ? "Image generation timed out. Please try again."
+        : error instanceof TypeError || error instanceof DOMException
+          ? "Could not prepare this image. Please try again."
+          : error.message;
+      setImageError({ stepId, message });
+    } finally {
+      imageJobRef.current = null;
+      setImageJob(null);
+    }
+  }
+
+  function handleGenerateImage(step) {
+    handleImageChange(step.id, async () => {
+      const user = auth.currentUser;
+      if (!user) throw new Error("Please sign in again.");
+      const token = await user.getIdToken();
+      const response = await fetch("/api/generate-story-image", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ description: step.imageDescription, childId: childId || null }),
+        signal: AbortSignal.timeout(60000),
+      });
+      if (!response.ok) {
+        const data = await response.json().catch(() => null);
+        throw new Error(data?.error || "AI could not generate an illustration. Please try again.");
+      }
+      return response.blob();
+    }, true);
+  }
+
+  function renderImageFeedback(stepId) {
+    if (imageError?.stepId === stepId) return <p role="alert" className="story-image-error">{t(imageError.message)}</p>;
+    if (imageJob?.stepId === stepId) {
+      return <p role="status" className="story-image-status">{t(imageJob.generating ? "Generating illustration…" : "Preparing image…")}</p>;
+    }
+    return null;
+  }
+
+  /** @module Parent guides and saving */
+  function handleGuideChange(stepId, field, value) {
+    setSteps((current) => current.map((step) => step.id === stepId
+      ? { ...step, parentGuide: { ...step.parentGuide, [field]: value } } : step));
+  }
 
   const handleSave = () => {
     const moduleDefinition = {
@@ -434,827 +317,158 @@ export default function StoryModules({
       title: title.trim(),
       coverImage: resolvedCoverImage,
       steps,
-      childId: selectedPassportId || null,
-      stageDesign: {
-        framing: { ...stageFraming },
-        immersion: { ...stageImmersion },
-        reflection: { ...stageReflection },
-        continuity: { ...stageContinuity },
-      },
+      childId: childId || null,
+      stageDesign,
       fontPreset: sceneFont || "classic",
     };
-    if (!validateModule(moduleDefinition)) return;
-    onSave(moduleDefinition, initialStepsRef.current);
+    if (!isValid || imageJobRef.current) return;
+    onSave(moduleDefinition);
   };
 
-  /** @module Preview above the editor */
+  /** @module Story summary, page editing, and read-through */
   return (
-    <>
-      <section aria-labelledby="story-preview-heading">
-        <h2 id="story-preview-heading" className="mb-3 text-lg font-semibold">{t("Preview")}</h2>
-        <StoryPlayer
-          layout="preview"
-          moduleDefinition={previewStory}
-          templateContext={getTemplateContext(selectedPassport)}
-        />
-      </section>
-
-      <section className="story-editor-card mt-7" aria-busy={saving}>
-        <fieldset disabled={saving} inert={saving} className="min-w-0 space-y-4">
-          <h2 className="text-lg font-semibold">{t("Story editor")}</h2>
-          <div>
-            <label htmlFor="title" className="block text-sm text-zinc-700">
-              {t("title")}
-            </label>
-            <input
-              id="title"
-              value={title}
-              onChange={(e) => setTitle(e.target.value)}
-              placeholder={t("e.g., Calm Breathing Mission")}
-              className="mt-1 w-full bg-white/90 border border-zinc-200 rounded-xl px-4 py-2 text-zinc-900 placeholder-zinc-400 focus:outline-none focus:ring-2 focus:ring-rose-300/50 focus:border-rose-300 transition-all"
-            />
-          </div>
-          <div>
-            <label htmlFor="cover" className="block text-sm text-zinc-700">{t("Cover Image (optional)")}</label>
-            <div className="mt-1 flex flex-wrap gap-2">
-              <input
-                id="cover"
-                aria-describedby="cover-size-hint"
-                value={coverImage}
-                onChange={(e) => setCoverImage(e.target.value)}
-                placeholder={t("Paste an image link here (optional)")}
-                className="min-w-0 flex-1 bg-white/90 border border-zinc-200 rounded-xl px-4 py-2 text-zinc-900 placeholder-zinc-400 focus:outline-none focus:ring-2 focus:ring-rose-300/50 focus:border-rose-300 transition-all"
-              />
-              <label className="story-editor-button">
-                <svg
-                  xmlns="http://www.w3.org/2000/svg"
-                  className="w-4 h-4"
-                  viewBox="0 0 20 20"
-                  fill="currentColor"
-                >
-                  <path
-                    fillRule="evenodd"
-                    d="M4 3a2 2 0 00-2 2v10a2 2 0 002 2h12a2 2 0 002-2V5a2 2 0 00-2-2H4zm12 12H4l4-8 3 6 2-4 3 6z"
-                    clipRule="evenodd"
-                  />
-                </svg>{t("Upload Image")}<input
-                  type="file"
-                  accept="image/*"
-                  className="sr-only"
-                  aria-describedby="cover-size-hint"
-                  onChange={async (e) => {
-                    const file = e.target.files?.[0];
-                    if (file) {
-                      try {
-                        const dataURL = await fileToDataURL(file);
-                        setCoverImage(dataURL);
-                      } catch (error) {
-                        console.error("Error uploading image:", error);
-                        alert(t("Failed to upload image. Please try again."));
-                      }
-                    }
-                    e.target.value = ""; // Reset input
-                  }}
-                />
-              </label>
+    <section className="story-preview-workspace" aria-busy={saving}>
+      <fieldset disabled={saving} inert={saving} className="story-preview-workspace">
+        <header className="story-editor-card story-preview-header">
+          <div className="story-preview-toolbar">
+            <h1>{t("Story preview")}</h1>
+            <div className="story-preview-switch" role="group" aria-label={t("Story preview")}>
+              <button type="button" aria-pressed={view === "edit"} onClick={() => setView("edit")}>{t("Edit")}</button>
+              <button type="button" aria-pressed={view === "read"} onClick={() => setView("read")}>{t("Read-through")}</button>
             </div>
-            <p id="cover-size-hint" className="mt-1 text-xs text-zinc-600">
-              {t("Recommended cover size: 1500 × 1000 px (3:2).")}
-            </p>
           </div>
-
-          <div>
-            <label
-              htmlFor="passport-select"
-              className="block text-sm text-zinc-700"
-            >{t("For Child (Passport)")}</label>
-            <select
-              id="passport-select"
-              value={selectedPassportId}
-              onChange={(e) => setSelectedPassportId(e.target.value)}
-              className="mt-1 w-full bg-white/90 border border-zinc-200 rounded-xl px-4 py-2 text-zinc-900 focus:outline-none focus:ring-2 focus:ring-rose-300/50 focus:border-rose-300 transition-all"
-            >
-              <option value="">{t("All Children / General")}</option>
-              {passports?.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.childName}
-                </option>
-              ))}
-            </select>
-            <p className="mt-1 text-xs text-zinc-500">{t("Select which child this story is for. Leave as \"All Children\" for stories that work for everyone.")}</p>
+          <StoryTextField className="story-preview-title" label={t("Story title")} value={title}
+            onValueChange={setTitle} context={templateContext} placeholder={t("Untitled Story")} />
+          <div className="story-preview-meta">
+            {setup && ["SCENARIO", "FOCUS", "TONE"].map((field) =>
+              setup.values[field] && <span key={field}>{interpolateStoryText(t(setup.values[field]), templateContext)}</span>)}
+            <span>{t("{count} pages", { count: steps.length })}</span>
           </div>
-
-          <h3 className="border-t border-[#e3e9df] pt-4 text-base font-semibold">{t("Edit the words on each page")}</h3>
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="text-sm text-zinc-700">{t("Add scene:")}</span>
-            <button
-              type="button"
-              onClick={() => addStep("doctor")}
-              className="story-editor-button"
-            >{t("Message")}</button>
-            <button
-              type="button"
-              onClick={() => addStep("user-input")}
-              className="story-editor-button"
-            >{t("Child's input")}</button>
-            <button
-              type="button"
-              onClick={() => addStep("choice")}
-              className="story-editor-button"
-            >{t("Multiple choice")}</button>
+          {setup?.values.PARENT_GOAL && (
+            <p className="story-preview-goal"><strong>{t("Parent goal")}</strong> · {interpolateStoryText(getStoryGoalDisplayText(setup, t), templateContext)}</p>
+          )}
+          {/* Place the cover in a separate section after the prototype's story summary. */}
+          <div className="story-preview-cover-edit">
+            <StoryImageUpload src={resolvedCoverImage} alt={t("Story cover")} cover disabled={Boolean(imageJob)}
+              onUpload={(file) => handleImageChange(null, () => file)} />
+            <p className="story-preview-cover-hint">{t("Recommended cover size: 1500 × 1000 px (3:2).")}</p>
+            {renderImageFeedback(null)}
           </div>
+        </header>
 
-          <ol className="space-y-4">
-            {steps.map((step, idx) => (
-              <li
-                key={step.id || `step-${idx}-${step.type}`}
-                className="rounded-xl border border-zinc-200 p-4 bg-white"
-              >
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <div className="text-sm text-zinc-600">
-                    {t(getStepTypeLabel(step.type))}
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <button
-                      type="button"
-                      onClick={() => moveStep(step.id, "up")}
-                      aria-label={t("Move up")}
-                      disabled={idx === 0}
-                      className="story-editor-button is-icon"
-                    >
-                      <ArrowUp className="size-4" aria-hidden="true" />
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => moveStep(step.id, "down")}
-                      aria-label={t("Move down")}
-                      disabled={idx === steps.length - 1}
-                      className="story-editor-button is-icon"
-                    >
-                      <ArrowDown className="size-4" aria-hidden="true" />
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => deleteStep(step.id)}
-                      className="story-editor-button is-danger"
-                    >{t("Delete")}</button>
-                  </div>
-                </div>
+        <div hidden={view !== "read"}>
+          <StoryPlayer layout="preview" moduleDefinition={previewStory} templateContext={templateContext} />
+        </div>
 
-                {step.type === "doctor" && (
-                  <div className="mt-3 space-y-3">
-                    <div>
-                      <div className="mb-1 flex flex-wrap items-center justify-between gap-2">
-                        <label className="block text-sm text-zinc-700">{t("Message")}</label>
-                        <VariableSelector
-                          onInsert={(variable) =>
-                            insertVariableAtCursor(
-                              step.id,
-                              "message",
-                              variable
-                            )
-                          }
-                        />
-                      </div>
-                      <textarea
-                        ref={(el) => {
-                          textareaRefs.current[`${step.id}-message`] = el;
-                        }}
-                        value={step.message}
-                        onChange={(e) =>
-                          updateStep(step.id, "message", e.target.value)
-                        }
-                        rows={3}
-                        placeholder={t("Write the message...")}
-                        className="mt-1 w-full bg-white/90 border border-zinc-200 rounded-xl px-4 py-2 text-zinc-900 placeholder-zinc-400 focus:outline-none focus:ring-2 focus:ring-rose-300/50 focus:border-rose-300 transition-all"
-                      />
+        <div hidden={view !== "edit"} className="story-preview-workspace">
+          <ol className="story-preview-workspace">
+            {steps.map((step, index) => {
+              const original = initialById.get(step.id);
+              const edited = !original || JSON.stringify(original) !== JSON.stringify(step);
+              const pageLabel = t("Page {page}", { page: index + 1 });
+              const words = step.message?.match(/\S+/g)?.length || 0;
+              const limit = setup?.values.MAX_WORDS_PER_PAGE;
+              const choiceLimit = setup?.values.MAX_CHOICES;
+              return (
+                <li key={step.id} className="story-preview-page" data-edited={edited} data-stage={step.stage}>
+                  <div className="story-preview-toolbar story-preview-page-bar">
+                    <div className="story-preview-meta">
+                      <strong>{pageLabel}</strong>
+                      {step.stage && <span className="story-preview-stage-label">{t(step.stage[0].toUpperCase() + step.stage.slice(1))}</span>}
+                      <span>{t(getStepTypeLabel(step.type))}</span>
+                      {edited && <span className="story-preview-edited">{t("Edited")}</span>}
                     </div>
-                    <div>
-                      <label className="block text-sm text-zinc-700">{t("Image (optional)")}</label>
-                      <div className="mt-1 flex flex-wrap gap-2">
-                        <input
-                          value={step.imageUrl || ""}
-                          onChange={(e) =>
-                            updateStep(step.id, "imageUrl", e.target.value)
-                          }
-                          placeholder={t("Paste an image link here (optional)")}
-                          className="min-w-0 flex-1 bg-white/90 border border-zinc-200 rounded-xl px-4 py-2 text-zinc-900 placeholder-zinc-400 focus:outline-none focus:ring-2 focus:ring-rose-300/50 focus:border-rose-300 transition-all"
-                        />
-                        <label className="story-editor-button whitespace-nowrap">
-                          <svg
-                            xmlns="http://www.w3.org/2000/svg"
-                            className="w-4 h-4"
-                            viewBox="0 0 20 20"
-                            fill="currentColor"
-                          >
-                            <path
-                              fillRule="evenodd"
-                              d="M4 3a2 2 0 00-2 2v10a2 2 0 002 2h12a2 2 0 002-2V5a2 2 0 00-2-2H4zm12 12H4l4-8 3 6 2-4 3 6z"
-                              clipRule="evenodd"
-                            />
-                          </svg>{t("Upload")}<input
-                            type="file"
-                            accept="image/*"
-                            className="sr-only"
-                            onChange={async (e) => {
-                              const file = e.target.files?.[0];
-                              if (file) {
-                                try {
-                                  const dataURL = await fileToDataURL(file);
-                                  updateStep(step.id, "imageUrl", dataURL);
-                                } catch (error) {
-                                  console.error(
-                                    "Error uploading image:",
-                                    error
-                                  );
-                                  alert(
-                                    "Failed to upload image. Please try again."
-                                  );
-                                }
-                              }
-                              e.target.value = ""; // Reset input
-                            }}
-                          />
-                        </label>
-                      </div>
-                      {step.imageUrl && (
-                        <div className="mt-2 relative w-full max-w-xs aspect-4/3 rounded-lg overflow-hidden border border-zinc-200">
-                          <img
-                            src={step.imageUrl}
-                            alt={t("Step preview")}
-                            className="w-full h-full object-cover"
-                          />
+                    <div className="story-preview-toolbar">
+                      <button type="button" className="story-editor-button is-icon" disabled={index === 0}
+                        aria-label={t("Move up")} onClick={() => moveStep(step.id, "up")}><ArrowUp size={16} aria-hidden="true" /></button>
+                      <button type="button" className="story-editor-button is-icon" disabled={index === steps.length - 1}
+                        aria-label={t("Move down")} onClick={() => moveStep(step.id, "down")}><ArrowDown size={16} aria-hidden="true" /></button>
+                      {edited && original && <button type="button" className="story-editor-button" disabled={imageJob?.stepId === step.id}
+                        onClick={() => setSteps((current) => current.map((item) => item.id === step.id ? original : item))}>{t("Undo edits")}</button>}
+                      <button type="button" className="story-editor-button is-danger" disabled={imageJob?.stepId === step.id}
+                        onClick={() => handleDeleteStep(step)}>{t("Delete")}</button>
+                    </div>
+                  </div>
+                  <div className="story-preview-page-body">
+                    <div className="story-preview-picture">
+                      <StoryImageUpload src={step.imageUrl} alt={t("Step preview")} disabled={Boolean(imageJob)}
+                        onUpload={(file) => handleImageChange(step.id, () => file)} />
+                      <StoryTextField label={t("Illustration description")} value={step.imageDescription} rows={3}
+                        context={templateContext} onValueChange={(value) => updateStep(step.id, "imageDescription", value)} />
+                      {renderImageFeedback(step.id)}
+                      <button type="button" className="story-editor-button story-image-generate"
+                        disabled={Boolean(imageJob) || !step.imageDescription?.trim()} onClick={() => handleGenerateImage(step)}>
+                        <Sparkles size={16} aria-hidden="true" />
+                        {t("Generate illustration with AI")}
+                      </button>
+                    </div>
+                    <div className="story-preview-copy">
+                      <StoryTextField label={t("Message")} value={step.message} rows={3}
+                        context={templateContext} onValueChange={(value) => updateStep(step.id, "message", value)} />
+                      {limit && <p className="story-preview-word-count" data-over={words > limit}>
+                        {t("{count} / {limit} words", { count: words, limit })}
+                      </p>}
+                      {step.type === "user-input" && <StoryTextField label={t("Example answer shown to the child")} value={step.placeholder}
+                        context={templateContext} onValueChange={(value) => updateStep(step.id, "placeholder", value)} />}
+                      {step.type === "choice" && (
+                        <div className="story-preview-options">
+                          {step.options.map((option, optionIndex) => (
+                            <div key={optionIndex} className="story-preview-option">
+                              <StoryTextField label={t("Choice {number}", { number: optionIndex + 1 })} value={option}
+                                context={templateContext} onValueChange={(value) => updateChoiceOption(step.id, optionIndex, value)} />
+                              <button type="button" className="story-editor-button is-danger is-icon" disabled={step.options.length <= 1}
+                                aria-label={t("Remove choice {number}", { number: optionIndex + 1 })}
+                                onClick={() => removeChoiceOption(step.id, optionIndex)}><X size={16} aria-hidden="true" /></button>
+                              {step.optionImageDescriptions?.[optionIndex] && <p>{interpolateStoryText(step.optionImageDescriptions[optionIndex], templateContext)}</p>}
+                            </div>
+                          ))}
+                          <button type="button" className="story-editor-button" disabled={Boolean(choiceLimit && step.options.length >= choiceLimit)}
+                            onClick={() => addChoiceOption(step.id)}>{t("Add choice")}</button>
                         </div>
                       )}
                     </div>
                   </div>
-                )}
-
-                {step.type === "user-input" && (
-                  <div className="mt-3 space-y-3">
-                    <div>
-                      <div className="mb-1 flex flex-wrap items-center justify-between gap-2">
-                        <label className="block text-sm text-zinc-700">{t("Prompt")}</label>
-                        <VariableSelector
-                          onInsert={(variable) =>
-                            insertVariableAtCursor(
-                              step.id,
-                              "message",
-                              variable
-                            )
-                          }
-                        />
-                      </div>
-                      <textarea
-                        ref={(el) => {
-                          textareaRefs.current[`${step.id}-message`] = el;
-                        }}
-                        value={step.message}
-                        onChange={(e) =>
-                          updateStep(step.id, "message", e.target.value)
-                        }
-                        rows={2}
-                        placeholder={t("Ask the child a question...")}
-                        className="mt-1 w-full bg-white/90 border border-zinc-200 rounded-xl px-4 py-2 text-zinc-900 placeholder-zinc-400 focus:outline-none focus:ring-2 focus:ring-rose-300/50 focus:border-rose-300 transition-all"
-                      />
-                    </div>
-                    <div>
-                      <div className="mb-1 flex flex-wrap items-center justify-between gap-2">
-                        <label className="block text-sm text-zinc-700">{t("Placeholder")}</label>
-                        <VariableSelector
-                          onInsert={(variable) =>
-                            insertVariableAtCursor(
-                              step.id,
-                              "placeholder",
-                              variable
-                            )
-                          }
-                        />
-                      </div>
-                      <input
-                        ref={(el) => {
-                          textareaRefs.current[`${step.id}-placeholder`] = el;
-                        }}
-                        value={step.placeholder || ""}
-                        onChange={(e) =>
-                          updateStep(step.id, "placeholder", e.target.value)
-                        }
-                        placeholder={t("Enter the child's response...")}
-                        className="mt-1 w-full bg-white/90 border border-zinc-200 rounded-xl px-4 py-2 text-zinc-900 placeholder-zinc-400 focus:outline-none focus:ring-2 focus:ring-rose-300/50 focus:border-rose-300 transition-all"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-sm text-zinc-700">{t("Image (optional)")}</label>
-                      <div className="mt-1 flex flex-wrap gap-2">
-                        <input
-                          value={step.imageUrl || ""}
-                          onChange={(e) =>
-                            updateStep(step.id, "imageUrl", e.target.value)
-                          }
-                          placeholder={t("Paste an image link here (optional)")}
-                          className="min-w-0 flex-1 bg-white/90 border border-zinc-200 rounded-xl px-4 py-2 text-zinc-900 placeholder-zinc-400 focus:outline-none focus:ring-2 focus:ring-rose-300/50 focus:border-rose-300 transition-all"
-                        />
-                        <label className="story-editor-button whitespace-nowrap">
-                          <svg
-                            xmlns="http://www.w3.org/2000/svg"
-                            className="w-4 h-4"
-                            viewBox="0 0 20 20"
-                            fill="currentColor"
-                          >
-                            <path
-                              fillRule="evenodd"
-                              d="M4 3a2 2 0 00-2 2v10a2 2 0 002 2h12a2 2 0 002-2V5a2 2 0 00-2-2H4zm12 12H4l4-8 3 6 2-4 3 6z"
-                              clipRule="evenodd"
-                            />
-                          </svg>{t("Upload")}<input
-                            type="file"
-                            accept="image/*"
-                            className="sr-only"
-                            onChange={async (e) => {
-                              const file = e.target.files?.[0];
-                              if (file) {
-                                try {
-                                  const dataURL = await fileToDataURL(file);
-                                  updateStep(step.id, "imageUrl", dataURL);
-                                } catch (error) {
-                                  console.error(
-                                    "Error uploading image:",
-                                    error
-                                  );
-                                  alert(
-                                    "Failed to upload image. Please try again."
-                                  );
-                                }
-                              }
-                              e.target.value = ""; // Reset input
-                            }}
-                          />
-                        </label>
-                      </div>
-                      {step.imageUrl && (
-                        <div className="mt-2 relative w-full max-w-xs aspect-4/3 rounded-lg overflow-hidden border border-zinc-200">
-                          <img
-                            src={step.imageUrl}
-                            alt={t("Step preview")}
-                            className="w-full h-full object-cover"
-                          />
-                        </div>
-                      )}
-                    </div>
+                  <div className="story-preview-guide">
+                    <h2>{t("Parent Guide")}</h2>
+                    {[
+                      ["title", "Guide title", undefined],
+                      ["description", "Guide description", 2],
+                      ["coActionPrompt", "Co-Action Prompt", 2],
+                    ].map(([field, label, rows]) => (
+                      <StoryTextField key={field} label={t(label)} rows={rows} context={templateContext}
+                        value={step.parentGuide?.[field]} onValueChange={(value) => handleGuideChange(step.id, field, value)} />
+                    ))}
                   </div>
-                )}
-
-                {step.type === "choice" && (
-                  <div className="mt-3 space-y-3">
-                    <div>
-                      <div className="mb-1 flex flex-wrap items-center justify-between gap-2">
-                        <label className="block text-sm text-zinc-700">{t("Question")}</label>
-                        <VariableSelector
-                          onInsert={(variable) =>
-                            insertVariableAtCursor(
-                              step.id,
-                              "message",
-                              variable
-                            )
-                          }
-                        />
-                      </div>
-                      <textarea
-                        ref={(el) => {
-                          textareaRefs.current[`${step.id}-message`] = el;
-                        }}
-                        value={step.message}
-                        onChange={(e) =>
-                          updateStep(step.id, "message", e.target.value)
-                        }
-                        rows={2}
-                        placeholder={t("Ask the child to choose...")}
-                        className="mt-1 w-full bg-white/90 border border-zinc-200 rounded-xl px-4 py-2 text-zinc-900 placeholder-zinc-400 focus:outline-none focus:ring-2 focus:ring-rose-300/50 focus:border-rose-300 transition-all"
-                      />
-                    </div>
-                    <div>
-                      <div className="flex flex-wrap items-center justify-between gap-2">
-                        <label className="block text-sm text-zinc-700">{t("Options")}</label>
-                        <button
-                          type="button"
-                          onClick={() => addChoiceOption(step.id)}
-                          className="story-editor-button"
-                        >{t("Add option")}</button>
-                      </div>
-                      <div className="mt-2 space-y-2">
-                        {(step.options || []).map((opt, i) => (
-                          <div key={i} className="flex items-center gap-2">
-                            <input
-                              value={opt}
-                              onChange={(e) =>
-                                updateChoiceOption(step.id, i, e.target.value)
-                              }
-                              placeholder={`Choice ${i + 1}`}
-                              className="min-w-0 flex-1 bg-white/90 border border-zinc-200 rounded-xl px-4 py-2 text-zinc-900 placeholder-zinc-400 focus:outline-none focus:ring-2 focus:ring-rose-300/50 focus:border-rose-300 transition-all"
-                            />
-                            <button
-                              type="button"
-                              onClick={() => removeChoiceOption(step.id, i)}
-                              className="story-editor-button is-danger is-icon"
-                              aria-label={t("Remove option")}
-                            >
-                              <X className="size-4" aria-hidden="true" />
-                            </button>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                    <div>
-                      <label className="block text-sm text-zinc-700">{t("Image (optional)")}</label>
-                      <div className="mt-1 flex flex-wrap gap-2">
-                        <input
-                          value={step.imageUrl || ""}
-                          onChange={(e) =>
-                            updateStep(step.id, "imageUrl", e.target.value)
-                          }
-                          placeholder={t("Paste an image link here (optional)")}
-                          className="min-w-0 flex-1 bg-white/90 border border-zinc-200 rounded-xl px-4 py-2 text-zinc-900 placeholder-zinc-400 focus:outline-none focus:ring-2 focus:ring-rose-300/50 focus:border-rose-300 transition-all"
-                        />
-                        <label className="story-editor-button whitespace-nowrap">
-                          <svg
-                            xmlns="http://www.w3.org/2000/svg"
-                            className="w-4 h-4"
-                            viewBox="0 0 20 20"
-                            fill="currentColor"
-                          >
-                            <path
-                              fillRule="evenodd"
-                              d="M4 3a2 2 0 00-2 2v10a2 2 0 002 2h12a2 2 0 002-2V5a2 2 0 00-2-2H4zm12 12H4l4-8 3 6 2-4 3 6z"
-                              clipRule="evenodd"
-                            />
-                          </svg>{t("Upload")}<input
-                            type="file"
-                            accept="image/*"
-                            className="sr-only"
-                            onChange={async (e) => {
-                              const file = e.target.files?.[0];
-                              if (file) {
-                                try {
-                                  const dataURL = await fileToDataURL(file);
-                                  updateStep(step.id, "imageUrl", dataURL);
-                                } catch (error) {
-                                  console.error(
-                                    "Error uploading image:",
-                                    error
-                                  );
-                                  alert(
-                                    "Failed to upload image. Please try again."
-                                  );
-                                }
-                              }
-                              e.target.value = ""; // Reset input
-                            }}
-                          />
-                        </label>
-                      </div>
-                      {step.imageUrl && (
-                        <div className="mt-2 relative w-full max-w-xs aspect-4/3 rounded-lg overflow-hidden border border-zinc-200">
-                          <img
-                            src={step.imageUrl}
-                            alt={t("Step preview")}
-                            className="w-full h-full object-cover"
-                          />
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                )}
-              </li>
-            ))}
+                </li>
+              );
+            })}
           </ol>
 
-          <div className="flex items-center gap-3 pt-2">
-            <button
-              type="button"
-              onClick={handleSave}
-              disabled={!isValid || aiGenerating || saving}
-              data-telemetry={
-                editingId ? "parent_story_update" : "parent_story_save"
-              }
-              className="story-editor-button is-primary"
-            >
-              {editingId ? t("Update story") : t("Save story")}
-            </button>
+          <div className="story-editor-card story-preview-add">
+            <label htmlFor="new-page-type">{t("Page type")}</label>
+            <select id="new-page-type" className="story-preview-field" value={newType} onChange={(event) => setNewType(event.target.value)}>
+              {["doctor", "choice", "user-input"].map((type) => <option key={type} value={type}>{t(getStepTypeLabel(type))}</option>)}
+            </select>
+            <label htmlFor="new-page-stage">{t("Stage")}</label>
+            <select id="new-page-stage" className="story-preview-field" value={newStage} onChange={(event) => setNewStage(event.target.value)}>
+              {storyStages.map((stage) => <option key={stage} value={stage}>{t(stage[0].toUpperCase() + stage.slice(1))}</option>)}
+            </select>
+            <button type="button" className="story-editor-button" onClick={handleAddStep}>{t("Add page")}</button>
           </div>
 
-          {/* AI settings sit at the bottom of the editor. Generated steps are appended to the list. */}
-          <details open className="story-editor-ai group">
-            <summary className="story-editor-ai-toggle flex cursor-pointer list-none items-center gap-2 rounded-xl font-semibold [&::-webkit-details-marker]:hidden">
-              <Sparkles className="size-4 shrink-0" aria-hidden="true" />
-              {t("AI step generator")}
-              <ChevronDown className="ml-auto size-4 group-open:rotate-180" aria-hidden="true" />
-            </summary>
-            <div className="mt-4 flex flex-wrap gap-2">
-              {[
-                { n: 1, label: "1. Framing" },
-                { n: 2, label: "2. Immersion" },
-                { n: 3, label: "3. Reflection" },
-                { n: 4, label: "4. Continuity" },
-              ].map((tab) => (
-                <button
-                  key={tab.n}
-                  type="button"
-                  onClick={() => setActiveStage(tab.n)}
-                  aria-pressed={activeStage === tab.n}
-                  className="story-editor-button is-pill"
-                >
-                  {tab.label}
-                </button>
-              ))}
-            </div>
+        </div>
 
-            <div className="mt-4">
-              {activeStage === 1 && (
-                <div className="rounded-xl border border-zinc-200 p-4 bg-white space-y-4">
-                  <h3 className="text-lg font-semibold text-zinc-900">{t("Stage 1 · Narrative Framing")}</h3>
-                  <p className="text-sm text-zinc-600">{t("Personalize the setup and align with today's goal.")}</p>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div>
-                      <label className="block text-sm text-zinc-700">{t("Today's focus")}</label>
-                      <select
-                        value={stageFraming.focus}
-                        onChange={(e) =>
-                          setStageFraming({
-                            ...stageFraming,
-                            focus: e.target.value,
-                          })
-                        }
-                        className="mt-1 w-full bg-white/90 border border-zinc-200 rounded-xl px-4 py-2"
-                      >
-                        <option value="greeting">{t("Greeting / Saying hello")}</option>
-                        <option value="sharing">{t("Sharing / Turn‑taking")}</option>
-                        <option value="routine">{t("Morning routine")}</option>
-                        <option value="transitions">{t("Transitions: between activities")}</option>
-                        <option value="sensory">{t("Managing sensory surprises")}</option>
-                      </select>
-                    </div>
-                    <div>
-                      <label className="block text-sm text-zinc-700">{t("Scenario")}</label>
-                      <select
-                        value={stageFraming.scenario}
-                        onChange={(e) =>
-                          setStageFraming({
-                            ...stageFraming,
-                            scenario: e.target.value,
-                          })
-                        }
-                        className="mt-1 w-full bg-white/90 border border-zinc-200 rounded-xl px-4 py-2"
-                      >
-                        <option value="school">{t("School: arrival and wave")}</option>
-                        <option value="playdate">{t("Playdate: meet a new friend")}</option>
-                        <option value="store">{t("Grocery store: checkout line")}</option>
-                        <option value="clinic">{t("Clinic: waiting room")}</option>
-                        <option value="transitions">{t("Transitions: changing activities")}</option>
-                        <option value="routine">{t("Daily routine: getting ready")}</option>
-                        <option value="park">{t("Park: playground interaction")}</option>
-                        <option value="home">{t("Home: family time")}</option>
-                        <option value="restaurant">{t("Restaurant: dining out")}</option>
-                      </select>
-                    </div>
-                    <div>
-                      <label className="block text-sm text-zinc-700">{t("Desired tone")}</label>
-                      <select
-                        value={stageFraming.tone}
-                        onChange={(e) =>
-                          setStageFraming({
-                            ...stageFraming,
-                            tone: e.target.value,
-                          })
-                        }
-                        className="mt-1 w-full bg-white/90 border border-zinc-200 rounded-xl px-4 py-2"
-                      >
-                        <option value="brave">{t("Encouraging & brave")}</option>
-                        <option value="encouraging">{t("Encouraging & supportive")}</option>
-                        <option value="calm">{t("Calm & soothing")}</option>
-                        <option value="curious">{t("Curious & playful")}</option>
-                        <option value="confident">{t("Confident & empowering")}</option>
-                        <option value="gentle">{t("Gentle & reassuring")}</option>
-                      </select>
-                    </div>
-                    <div>
-                      <label className="block text-sm text-zinc-700">{t("Parent goal (optional)")}</label>
-                      <input
-                        value={stageFraming.parentGoal}
-                        onChange={(e) =>
-                          setStageFraming({
-                            ...stageFraming,
-                            parentGoal: e.target.value,
-                          })
-                        }
-                        placeholder={t("e.g., Practice waving back to a classmate")}
-                        className="mt-1 w-full bg-white/90 border border-zinc-200 rounded-xl px-4 py-2"
-                      />
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              {activeStage === 2 && (
-                <div className="rounded-xl border border-zinc-200 p-4 bg-white space-y-4">
-                  <h3 className="text-lg font-semibold text-zinc-900">{t("Stage 2 · Immersion")}</h3>
-                  <p className="text-sm text-zinc-600">{t("Guide imagery and perspective‑taking; co‑play the avatar.")}</p>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div>
-                      <label className="block text-sm text-zinc-700">{t("Current feeling")}</label>
-                      <select
-                        value={stageImmersion.feeling}
-                        onChange={(e) =>
-                          setStageImmersion({
-                            ...stageImmersion,
-                            feeling: e.target.value,
-                          })
-                        }
-                        className="mt-1 w-full bg-white/90 border border-zinc-200 rounded-xl px-4 py-2"
-                      >
-                        <option value="shy">{t("Shy")}</option>
-                        <option value="excited">{t("Excited")}</option>
-                        <option value="nervous">{t("Nervous")}</option>
-                        <option value="proud">{t("Proud")}</option>
-                      </select>
-                    </div>
-                    <div>
-                      <label className="block text-sm text-zinc-700">{t("Co‑play prompt")}</label>
-                      <select
-                        value={stageImmersion.coplay}
-                        onChange={(e) =>
-                          setStageImmersion({
-                            ...stageImmersion,
-                            coplay: e.target.value,
-                          })
-                        }
-                        className="mt-1 w-full bg-white/90 border border-zinc-200 rounded-xl px-4 py-2"
-                      >
-                        <option value="wave">{t("Practice a superhero wave")}</option>
-                        <option value="share">{t("Offer a toy and say \"your turn\"")}</option>
-                        <option value="count">{t("Count to three together")}</option>
-                        <option value="breathe">{t("Do a 3‑breath sparkle")}</option>
-                      </select>
-                    </div>
-                    <div className="md:col-span-2">
-                      <label className="block text-sm text-zinc-700">{t("Imagery line (optional)")}</label>
-                      <textarea
-                        value={stageImmersion.imagery}
-                        onChange={(e) =>
-                          setStageImmersion({
-                            ...stageImmersion,
-                            imagery: e.target.value,
-                          })
-                        }
-                        placeholder={t("Describe what your child sees (e.g., 'Blue backpack, Mia smiles and waves').")}
-                        rows={2}
-                        className="mt-1 w-full bg-white/90 border border-zinc-200 rounded-xl px-4 py-2"
-                      />
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              {activeStage === 3 && (
-                <div className="rounded-xl border border-zinc-200 p-4 bg-white space-y-4">
-                  <h3 className="text-lg font-semibold text-zinc-900">{t("Stage 3 · Reflection")}</h3>
-                  <p className="text-sm text-zinc-600">{t("Connect the story to real‑life experiences and log progress.")}</p>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div>
-                      <label className="block text-sm text-zinc-700">{t("What did your child try?")}</label>
-                      <input
-                        value={stageReflection.tried}
-                        onChange={(e) =>
-                          setStageReflection({
-                            ...stageReflection,
-                            tried: e.target.value,
-                          })
-                        }
-                        placeholder={t("e.g., Waved back and smiled")}
-                        className="mt-1 w-full bg-white/90 border border-zinc-200 rounded-xl px-4 py-2"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-sm text-zinc-700">{t("Parent confidence")}</label>
-                      <select
-                        value={stageReflection.confidence}
-                        onChange={(e) =>
-                          setStageReflection({
-                            ...stageReflection,
-                            confidence: e.target.value,
-                          })
-                        }
-                        className="mt-1 w-full bg-white/90 border border-zinc-200 rounded-xl px-4 py-2"
-                      >
-                        <option>{t("Low")}</option>
-                        <option>{t("Medium")}</option>
-                        <option>{t("High")}</option>
-                      </select>
-                    </div>
-                    <div>
-                      <label className="block text-sm text-zinc-700">{t("Child comfort")}</label>
-                      <select
-                        value={stageReflection.comfort}
-                        onChange={(e) =>
-                          setStageReflection({
-                            ...stageReflection,
-                            comfort: e.target.value,
-                          })
-                        }
-                        className="mt-1 w-full bg-white/90 border border-zinc-200 rounded-xl px-4 py-2"
-                      >
-                        <option>{t("Low")}</option>
-                        <option>{t("Medium")}</option>
-                        <option>{t("High")}</option>
-                      </select>
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              {activeStage === 4 && (
-                <div className="rounded-xl border border-zinc-200 p-4 bg-white space-y-4">
-                  <h3 className="text-lg font-semibold text-zinc-900">{t("Stage 4 · Continuity")}</h3>
-                  <p className="text-sm text-zinc-600">{t("Keep the arc going with micro‑quests and badges.")}</p>
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                    <div>
-                      <label className="block text-sm text-zinc-700">{t("Next arc")}</label>
-                      <select
-                        value={stageContinuity.nextArc}
-                        onChange={(e) =>
-                          setStageContinuity({
-                            ...stageContinuity,
-                            nextArc: e.target.value,
-                          })
-                        }
-                        className="mt-1 w-full bg-white/90 border border-zinc-200 rounded-xl px-4 py-2"
-                      >
-                        <option value="school-arc">{t("School Adventure (week)")}</option>
-                        <option value="friend-arc">{t("New Friend Mini‑Arc")}</option>
-                        <option value="store-arc">{t("Helper at the Store")}</option>
-                      </select>
-                    </div>
-                    <div>
-                      <label className="block text-sm text-zinc-700">{t("Reminder cadence")}</label>
-                      <select
-                        value={stageContinuity.cadence}
-                        onChange={(e) =>
-                          setStageContinuity({
-                            ...stageContinuity,
-                            cadence: e.target.value,
-                          })
-                        }
-                        className="mt-1 w-full bg-white/90 border border-zinc-200 rounded-xl px-4 py-2"
-                      >
-                        <option>{t("Daily")}</option>
-                        <option>{t("Every 2 days")}</option>
-                        <option>{t("Weekly")}</option>
-                      </select>
-                    </div>
-                    <div>
-                      <label className="block text-sm text-zinc-700">{t("Badge")}</label>
-                      <select
-                        value={stageContinuity.badge}
-                        onChange={(e) =>
-                          setStageContinuity({
-                            ...stageContinuity,
-                            badge: e.target.value,
-                          })
-                        }
-                        className="mt-1 w-full bg-white/90 border border-zinc-200 rounded-xl px-4 py-2"
-                      >
-                        <option value="bravery">{t("Bravery Badge")}</option>
-                        <option value="sharing">{t("Sharing Star")}</option>
-                        <option value="helper">{t("Helpful Hero")}</option>
-                      </select>
-                    </div>
-                  </div>
-                </div>
-              )}
-            </div>
-
-            <div className="mt-4 flex flex-wrap items-center gap-3">
-              <button
-                type="button"
-                onClick={generateStepsFromStages}
-                disabled={
-                  aiGenerating || (aiRetryAt && (aiNow || Date.now()) < aiRetryAt)
-                }
-                className="story-editor-button is-primary"
-              >
-                {aiGenerating
-                  ? t("Generating…")
-                  : aiRetryAt && (aiNow || Date.now()) < aiRetryAt
-                  ? t("Rate limited ({seconds}s)", { seconds: Math.ceil((aiRetryAt - (aiNow || Date.now())) / 1000) })
-                  : t("Generate step with Ai")}{" "}
-                <Sparkles className="inline-block w-4 h-4 mb-1" aria-hidden="true" />
-              </button>
-              {aiError ? (
-                <span role="alert" className="text-sm text-red-700">{t(aiError)}</span>
-              ) : null}
-            </div>
-          </details>
-        </fieldset>
-      </section>
-    </>
+        <footer className="story-editor-card story-preview-toolbar story-preview-footer">
+          <p role="status">{t(exceedsBudget ? "This story is too large to save. Replace a large image or remove a page."
+            : hasIncompleteGuide ? "Complete all three fields in the parent guide before saving."
+            : changed ? "You've edited this story." : "No edits yet.")}</p>
+          <button type="button" className="story-editor-button is-primary" onClick={handleSave}
+            disabled={!isValid || Boolean(imageJob) || saving}
+            data-telemetry={isUpdating ? "parent_story_update" : "parent_story_save"}>
+            {t(saving ? "Saving story…" : isUpdating ? "Update story" : "Save story")}
+          </button>
+        </footer>
+      </fieldset>
+    </section>
   );
 }

@@ -1,5 +1,6 @@
 {
   "Enter a child name.": "Enter a child name.",
+  "Enter an age.": "Enter an age.",
   "Enter digits only for age.": "Enter digits only for age.",
   "Profile deleted successfully": "Profile deleted successfully",
   "Changes saved successfully": "Changes saved successfully",
@@ -491,6 +492,7 @@
   "Story editor": "Story editor",
   "Story title": "Story title",
   "Child name": "Child name",
+  "Age": "Age",
   "Age (optional)": "Age (optional)",
   "Pronouns": "Pronouns",
   "Subject (they)": "Subject (they)",
@@ -499,6 +501,7 @@
   "Poss. pron. (theirs)": "Poss. pron. (theirs)",
   "Communication": "Communication",
   "Communication Modalities": "Communication Modalities",
+  "Select at least one communication modality.": "Select at least one communication modality.",
   "AAC": "AAC",
   "PECS": "PECS",
   "Gestures": "Gestures",
@@ -532,7 +535,7 @@
   "Parent guide processing progress": "Parent guide processing progress",
   "Create a communication passport to personalize stories for your child.": "Create a communication passport to personalize stories for your child.",
   "You can update these details on the profile page at any time.": "You can update these details on the profile page at any time.",
-  "Choose a profile and enter a story title. Create or generate a story in the editor, then edit every page.": "Choose a profile and enter a story title. Create or generate a story in the editor, then edit every page.",
+  "Choose a profile and enter a story title. Set up your story, generate it with AI, then edit each page.": "Choose a profile and enter a story title. Set up your story, generate it with AI, then edit each page.",
   "Insert Variable": "Insert Variable",
   "e.g., Calm Breathing Mission": "e.g., Calm Breathing Mission",
   "Cover Image (optional)": "Cover Image (optional)",
@@ -754,5 +757,10 @@
   "Move down": "Move down",
   "This story has no pages yet.": "This story has no pages yet.",
   "Read aloud": "Read aloud",
-  "Text size": "Text size"
+  "Text size": "Text size",
+  "← Back to story workshop": "← Back to story workshop",
+  "You've edited the current story. Generating again replaces your edits.": "You've edited the current story. Generating again replaces your edits.",
+  "Replace and generate": "Replace and generate",
+  "Keep my edits": "Keep my edits",
+  "You haven't saved the generated story in the editor yet. Keep it or generate again.": "You haven't saved the generated story in the editor yet. Keep it or generate again."
 }

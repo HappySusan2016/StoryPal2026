@@ -1,7 +1,6 @@
 /* Track server-side step generation quotas per account and US Central calendar day. Reserve quota transactionally to prevent concurrent requests from exceeding the limit. */
 import { randomUUID } from "node:crypto";
-import { getAdminApp } from "./firebaseAdmin";
-import { getAuth } from "firebase-admin/auth";
+import { verifyGenerationAccount } from "./firebaseAdmin";
 import { FieldValue, getFirestore } from "firebase-admin/firestore";
 
 // Use the Chicago time zone for US Central time to handle CST and CDT automatically.
@@ -35,19 +34,7 @@ function quotaError(status, code, message, extra = {}) {
 
 /** Verify the account and reserve quota for the day. Future requests automatically reclaim expired reservations. */
 export async function reserveStepQuota(req) {
-  const token = req.headers.get("authorization")?.match(/^Bearer (.+)$/i)?.[1];
-  if (!token) throw quotaError(401, "UNAUTHORIZED", "Please sign in to generate a step.");
-  const app = getAdminApp();
-  let uid;
-  try {
-    ({ uid } = await getAuth(app).verifyIdToken(token));
-  } catch (error) {
-    // Treat only invalid tokens as sign-in errors. Report infrastructure failures as service unavailable.
-    if (/^auth\/(argument-error|invalid-id-token|id-token-expired|id-token-revoked|user-disabled)$/.test(error.code || "")) {
-      throw quotaError(401, "UNAUTHORIZED", "Please sign in again.");
-    }
-    throw error;
-  }
+  const { app, uid } = await verifyGenerationAccount(req);
   const limit = Number(process.env.GEMINI_STEP_DAILY_LIMIT ?? 0);
   if (!Number.isSafeInteger(limit) || limit < 1) throw new Error("Invalid GEMINI_STEP_DAILY_LIMIT");
   const now = Date.now();
@@ -70,7 +57,7 @@ export async function reserveStepQuota(req) {
     reservations[reservationId] = Date.now() + 120000;
     transaction.set(ref, { stepGenerationCount: count, reservations, updatedAt: FieldValue.serverTimestamp() });
   });
-  return { db, ref, reservationId, limit, resetAt: new Date(resetAt).toISOString() };
+  return { db, ref, uid, reservationId, limit, resetAt: new Date(resetAt).toISOString() };
 }
 
 /** Count successes and release failed reservations. Settling the same reservation twice cannot consume quota twice. */

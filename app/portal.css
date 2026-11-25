@@ -897,6 +897,9 @@
   .story-form .hint {
     margin: 8px 0 0;
   }
+  .workshop-stories-toggle {
+    margin-top: 12px;
+  }
   .story-list {
     list-style: none;
     margin: 14px 0 0;
@@ -1948,7 +1951,7 @@
 }
 
 
-/* Reuse the reading card in the editor and collapse AI settings within the steps section. */
+/* Share story card styles between editing and read-through. */
 .story-editor-page .reader-top h1 { margin-top: 8px; font-size: 28px; }
 .story-editor-page .reader-top p { margin: 4px 0 0; font-size: 12px; }
 .story-editor-back { font-size: 12px; font-weight: 700; text-decoration: none; }
@@ -2009,15 +2012,6 @@
 }
 
 .story-editor-card { padding: clamp(16px, 3vw, 28px); }
-.story-editor-ai {
-  padding: clamp(12px, 3vw, 20px);
-  border: 1px solid #f3e2cf;
-  border-radius: 16px;
-  background: #fff7ee;
-  color: #4e3f30;
-}
-
-
 /* Use the project's dark green, mint green, and warm colors for editor actions, preview navigation, and save feedback. */
 .story-editor-button {
   --button-bg: var(--mint-2);
@@ -2077,8 +2071,6 @@
   cursor: pointer;
 }
 .story-editor-menu-option:hover { background: var(--mint-2); }
-.story-editor-ai-toggle { color: var(--green-deep); min-height: 40px; }
-.story-editor-ai-toggle:hover { color: var(--green); }
 @media (prefers-reduced-motion: reduce) {
   .story-editor-button { transition: none; }
 }
@@ -2197,4 +2189,166 @@
 }
 @media (prefers-reduced-motion: reduce) {
   .story-reward-stars svg { animation: none; }
+}
+
+/* Use the portal's mint green, warm white, and dark green for the story preview. */
+.story-preview-workspace { display: grid; min-width: 0; gap: 16px; }
+.story-preview-workspace [hidden] { display: none; }
+.story-preview-header { display: grid; gap: 12px; border-top: 4px solid var(--sage); }
+.story-preview-toolbar,
+.story-preview-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.story-preview-toolbar { justify-content: space-between; }
+.story-preview-header h1 { color: var(--green-deep); font-size: 14px; font-weight: 700; }
+.story-preview-switch { display: flex; padding: 3px; border-radius: 12px; background: var(--mint-2); }
+.story-preview-switch button { padding: 6px 12px; border-radius: 9px; color: var(--green-deep); cursor: pointer; }
+.story-preview-switch button[aria-pressed="true"] { background: var(--green); color: white; }
+.story-preview-meta span {
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: var(--mint-2);
+  color: var(--green-deep);
+  font-size: 12px;
+}
+.story-preview-meta .story-preview-edited { background: #fff1dc; color: #765021; }
+.story-preview-title > label {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+.story-preview-title .story-preview-field {
+  padding: 4px 8px;
+  font-size: clamp(22px, 2.8vw, 32px);
+  font-weight: 800;
+  border-color: transparent;
+  background: transparent;
+}
+.story-preview-title .story-preview-field:hover { border-color: #dbe4d9; }
+.story-preview-title .story-preview-field:focus { background: var(--white); }
+.story-preview-goal, .story-preview-cover-hint { color: var(--green-deep); font-size: 13px; }
+.story-preview-cover-edit { display: grid; width: min(100%, 280px); gap: 8px; }
+.story-preview-field {
+  display: block;
+  width: 100%;
+  min-width: 0;
+  padding: 9px 12px;
+  border: 1px solid #dbe4d9;
+  border-radius: 10px;
+  background: var(--white);
+  color: #27342e;
+}
+textarea.story-preview-field { min-height: 4.2em; resize: vertical; }
+.story-preview-field:focus-visible, .story-preview-switch button:focus-visible {
+  outline: 2px solid var(--green);
+  outline-offset: 2px;
+}
+/* Apply stage colors to card edges, page headers, and illustration areas, and always show the stage name. */
+.story-preview-page {
+  --stage-surface: #f5f8f5;
+  --stage-border: #d3dfd5;
+  --stage-label: #e7eee8;
+  --stage-ink: #344c3d;
+  min-width: 0;
+  border: 1px solid var(--stage-border);
+  border-inline-start-width: 4px;
+  border-radius: 18px;
+  background: var(--white);
+  box-shadow: var(--card-shadow);
+}
+.story-preview-page[data-stage="framing"] {
+  --stage-surface: #edf7ef;
+  --stage-border: #a7c8af;
+  --stage-label: #dceee0;
+  --stage-ink: #274c35;
+}
+.story-preview-page[data-stage="immersion"] {
+  --stage-surface: #edf5fc;
+  --stage-border: #a7c4dd;
+  --stage-label: #dcecf9;
+  --stage-ink: #234868;
+}
+.story-preview-page[data-stage="reflection"] {
+  --stage-surface: #fff4e8;
+  --stage-border: #dbb99a;
+  --stage-label: #fae8d5;
+  --stage-ink: #6c4328;
+}
+.story-preview-page[data-stage="continuity"] {
+  --stage-surface: #f5f0fc;
+  --stage-border: #c4b3dc;
+  --stage-label: #ebe1f8;
+  --stage-ink: #503768;
+}
+.story-preview-page-bar { padding: 12px 16px; border-radius: 14px 17px 0 0; background: var(--stage-surface); }
+.story-preview-meta .story-preview-stage-label {
+  background: var(--stage-label);
+  color: var(--stage-ink);
+  font-weight: 700;
+}
+.story-preview-page-bar .story-editor-button { min-height: 34px; }
+.story-preview-page-body { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 3fr); gap: 16px; padding: 16px; }
+.story-preview-picture, .story-preview-copy, .story-preview-options { display: grid; align-content: start; gap: 8px; }
+.story-preview-picture { border-radius: 12px; padding: 12px; background: var(--stage-surface); }
+.story-image-frame {
+  position: relative;
+  display: grid;
+  place-items: center;
+  min-height: 96px;
+  border: 1px dashed var(--stage-border, #d3dfd5);
+  border-radius: 10px;
+  background: rgb(255 255 255 / 76%);
+}
+.story-image-frame[data-filled="true"] { aspect-ratio: 3 / 2; border-style: solid; }
+.story-image-frame img { object-fit: contain; border-radius: inherit; }
+.story-image-frame[data-filled="true"] .story-image-upload { position: absolute; inset-inline-end: 8px; inset-block-end: 8px; }
+.story-image-upload { --button-bg: #fff; --button-hover: #eaf4ec; }
+.story-image-upload[aria-disabled="true"] { opacity: 0.65; cursor: not-allowed; }
+.story-image-generate { justify-self: end; }
+.story-image-error, .story-image-status { font-size: 13px; }
+.story-image-error { color: #8e4534; }
+.story-image-status { color: var(--green-deep); }
+.story-preview-option { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; align-items: end; }
+.story-preview-option p { grid-column: 1 / -1; font-size: 12px; }
+.story-preview-options > button { justify-self: start; }
+.story-preview-guide {
+  display: grid;
+  gap: 8px;
+  padding: 14px 16px;
+  border-top: 1px solid #f3e2cf;
+  border-radius: 0 0 17px 17px;
+  background: #fff7ee;
+}
+.story-preview-guide h2 { color: #684b33; font-size: 14px; font-weight: 700; }
+.story-preview-word-count { font-size: 12px; color: var(--green-deep); }
+.story-preview-word-count[data-over="true"] { color: #8e4534; }
+.story-preview-add { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+.story-preview-add select { width: auto; max-width: 100%; }
+.story-preview-footer { padding-block: 12px; }
+.story-preview-footer p { font-size: 13px; color: var(--green-deep); }
+.story-variable-field { position: relative; min-width: 0; }
+.story-variable-field label { display: block; margin-bottom: 4px; font-size: 13px; color: var(--green-deep); }
+.story-variable-menu {
+  position: absolute;
+  z-index: 10;
+  inset-block-start: calc(100% + 4px);
+  inset-inline-start: 0;
+  width: min(100%, 280px);
+  padding: 4px;
+  border: 1px solid #dbe4d9;
+  border-radius: 12px;
+  background: var(--white);
+  box-shadow: var(--card-shadow);
+}
+.story-variable-menu small { display: block; overflow-wrap: anywhere; }
+.story-variable-menu [aria-selected="true"] { background: var(--mint-2); }
+
+@media (max-width: 640px) {
+  .story-preview-page-body { grid-template-columns: minmax(0, 1fr); }
 }

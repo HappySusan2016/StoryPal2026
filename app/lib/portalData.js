@@ -36,6 +36,11 @@ export function detachProfileFromStories(stories, profileId) {
   );
 }
 
+/** Sort profiles by creation time, newest first, while preserving the relative order of older profiles without timestamps. */
+export function getNewestProfiles(passports) {
+  return [...passports].sort((first, second) => toMillis(second.createdAt) - toMillis(first.createdAt));
+}
+
 /** Select storybooks linked to valid profiles and return them newest first without reordering the input. */
 export function getProfileStories(stories, passports) {
   const profileIds = new Set(passports.map(passport => passport.id));

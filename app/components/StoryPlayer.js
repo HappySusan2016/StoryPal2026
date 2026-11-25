@@ -6,15 +6,14 @@ import Image from "next/image";
 import { flushSync } from "react-dom";
 import { printStoryPages } from "./printStoryPages";
 import { ArrowLeft, ArrowRight, BookOpen, Printer, Sparkles, Star, Volume2 } from "lucide-react";
+import { projectStoryEditorText, resolveStoryVariable, storyTextVariablePattern } from "../lib/storyEditorText";
 import { isValidParentGuide } from "../lib/parentGuides";
 
 /** @module Replace storybook profile variables with the current child's details */
 export function interpolateStoryText(text, context) {
   if (typeof text !== "string") return text;
-  const replaceVariable = (_, path) =>
-    String(path.trim().split(".").reduce((value, key) => value?.[key], context) ?? "");
-  return text.replace(/@([a-zA-Z0-9_.]+)/g, replaceVariable)
-    .replace(/\{\{\s*([^}]+)\s*\}\}/g, replaceVariable);
+  return text.replace(storyTextVariablePattern, (_, atPath, legacyPath) =>
+    String(resolveStoryVariable(atPath ?? legacyPath, context) ?? ""));
 }
 
 /** @module Cycle through normal, large, and extra-large reading text sizes */
@@ -330,7 +329,8 @@ export default function StoryPlayer({
   }, [audioEnabled]);
 
   function interpolate(text) {
-    return interpolateStoryText(text, templateContext);
+    return isPreview ? projectStoryEditorText(text, templateContext).display
+      : interpolateStoryText(text, templateContext);
   }
 
   function resetTransientState() {
@@ -535,19 +535,22 @@ export default function StoryPlayer({
     return null;
   }, [showParentGuide, currentStep, cachedGuide, loadingGuide]);
 
-  /** @module Storybook content display */
+  /** @module Shared illustrations for reading, preview, and printing */
   function renderStoryContent(step, isPrintPage = false) {
+    const pageImage = step?.imageUrl?.trim();
+    const displayImage = pageImage || coverImage;
     return (
       <>
-          {coverImage && !isModal && !isPrintPage ? (
+          {displayImage && !isModal && !isPrintPage ? (
             <div className="story-preview-image">
-              <Image src={coverImage} alt={title} width={1500} height={1000} unoptimized />
+              <Image src={displayImage} alt={interpolate(pageImage ? step.message || title : title)}
+                width={1500} height={1000} unoptimized />
             </div>
-          ) : coverImage ? (
+          ) : displayImage ? (
             <div className="story-print-cover relative w-full aspect-4/3 overflow-hidden">
               <Image
-                src={coverImage}
-                alt={title}
+                src={displayImage}
+                alt={interpolate(pageImage ? step.message || title : title)}
                 fill
                 className="object-cover"
                 unoptimized
@@ -574,7 +577,7 @@ export default function StoryPlayer({
             </div>
           ) : null}
           <div className="story-print-copy p-6 flex-1 flex flex-col" style={fontStyle}>
-            {(!isReader || isPrintPage) && (
+            {((!isReader && !isPreview) || isPrintPage) && (
               <h3 className="text-2xl font-semibold text-zinc-900 mb-4" style={fontStyle}>
                 {interpolate(title)}
               </h3>
@@ -582,16 +585,6 @@ export default function StoryPlayer({
 
             {step && (
               <div className="story-print-step flex-1 space-y-4">
-                {step.imageUrl && (
-                  <div className="story-print-step-image w-full rounded-2xl overflow-hidden border border-zinc-200">
-                    <img
-                      src={step.imageUrl}
-                      alt={interpolate(step.message || title)}
-                      className="w-full h-48 object-cover"
-                    />
-                  </div>
-                )}
-
                 {step.type === "doctor" && (
                   <div className="bg-[#f5f0ff] rounded-2xl p-4 border border-[#e5eee4]">
                     <p
@@ -1017,16 +1010,25 @@ export default function StoryPlayer({
                 <button
                   type="button"
                   onClick={isPreview ? handlePreviewNextPage : handleNext}
-                  disabled={isPreview ? isLastStep : needsResponse}
+                  disabled={isPreview ? isLastStep || (currentStep.type === "choice" && needsResponse) : needsResponse}
                   className="story-preview-next story-editor-button is-primary"
                 >
-                  {t(isReader && isLastStep ? "Finish" : "Next page")}
+                  {t(isLastStep ? isPreview ? "The end" : "Finish" : "Next page")}
                   <ArrowRight className="size-4 shrink-0" aria-hidden="true" />
                 </button>
               </nav>
             ) : (
               <p className="mx-6 mb-4 text-sm text-zinc-600">{t(isPreview ? "Add a step to preview your story." : "This story has no pages yet.")}</p>
             )
+          )}
+
+          {isPreview && isValidParentGuide(currentStep?.parentGuide) && (
+            <aside className="story-preview-guide mb-4">
+              <h2>{t("Parent Guide")}</h2>
+              <h3 className="font-semibold">{interpolate(currentStep.parentGuide.title)}</h3>
+              <p>{interpolate(currentStep.parentGuide.description)}</p>
+              <p><strong>{t("Co-Action Prompt")}</strong> · {interpolate(currentStep.parentGuide.coActionPrompt)}</p>
+            </aside>
           )}
 
           {!isReader && (
@@ -1136,7 +1138,7 @@ export default function StoryPlayer({
             </div>
 
             <h3 className="text-xl font-semibold text-amber-900 mb-2 flex items-center gap-2">
-              {parentGuide.title}
+              {interpolateStoryText(parentGuide.title, templateContext)}
               {loadingGuide && (
                 <span className="animate-spin">
                   <svg className="w-4 h-4 text-amber-600" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
@@ -1147,7 +1149,7 @@ export default function StoryPlayer({
               )}
             </h3>
             <p className="text-amber-800 text-sm mb-6">
-              {parentGuide.description}
+              {interpolateStoryText(parentGuide.description, templateContext)}
             </p>
 
             {loadingGuide ? (
@@ -1159,7 +1161,7 @@ export default function StoryPlayer({
                 <div className="text-xs font-semibold text-blue-600 uppercase tracking-wide mb-2 flex items-center gap-1">
                   <Sparkles className="w-3 h-3" />{t("Co-Action Prompt")}</div>
                 <p className="text-amber-900 text-sm italic leading-relaxed">
-                  {parentGuide.coActionPrompt}
+                  {interpolateStoryText(parentGuide.coActionPrompt, templateContext)}
                 </p>
               </div>
             ) : guideError ? (
