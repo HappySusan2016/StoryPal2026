@@ -278,15 +278,15 @@ export default function StoryModules({
     }
   }
 
-  function handleGenerateImage(step) {
-    handleImageChange(step.id, async () => {
+  function handleGenerateImage(stepId, input) {
+    handleImageChange(stepId, async () => {
       const user = auth.currentUser;
       if (!user) throw new Error("Please sign in again.");
       const token = await user.getIdToken();
       const response = await fetch("/api/generate-story-image", {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ description: step.imageDescription, childId: childId || null }),
+        body: JSON.stringify({ ...input, childId: childId || null }),
         signal: AbortSignal.timeout(60000),
       });
       if (!response.ok) {
@@ -297,10 +297,19 @@ export default function StoryModules({
     }, true);
   }
 
+  function handleGenerateCover() {
+    const descriptions = steps.map((step) => step.imageDescription?.trim() || step.message?.trim()).filter(Boolean);
+    const descriptionLimit = Math.floor(16000 / Math.max(descriptions.length, 1));
+    handleGenerateImage(null, {
+      cover: { title: title.trim(), descriptions: descriptions.map((description) => description.slice(0, descriptionLimit)) },
+    });
+  }
+
   function renderImageFeedback(stepId) {
     if (imageError?.stepId === stepId) return <p role="alert" className="story-image-error">{t(imageError.message)}</p>;
     if (imageJob?.stepId === stepId) {
-      return <p role="status" className="story-image-status">{t(imageJob.generating ? "Generating illustration…" : "Preparing image…")}</p>;
+      const status = stepId ? "Generating illustration…" : "Generating cover…";
+      return <p role="status" className="story-image-status">{t(imageJob.generating ? status : "Preparing image…")}</p>;
     }
     return null;
   }
@@ -352,6 +361,11 @@ export default function StoryModules({
             <StoryImageUpload src={resolvedCoverImage} alt={t("Story cover")} cover disabled={Boolean(imageJob)}
               onUpload={(file) => handleImageChange(null, () => file)} />
             <p className="story-preview-cover-hint">{t("Recommended cover size: 1500 × 1000 px (3:2).")}</p>
+            <button type="button" className="story-editor-button story-image-generate"
+              disabled={Boolean(imageJob) || saving || !title.trim()} onClick={handleGenerateCover}>
+              <Sparkles size={16} aria-hidden="true" />
+              {t("Generate cover with AI")}
+            </button>
             {renderImageFeedback(null)}
           </div>
         </header>
@@ -397,7 +411,8 @@ export default function StoryModules({
                         context={templateContext} onValueChange={(value) => updateStep(step.id, "imageDescription", value)} />
                       {renderImageFeedback(step.id)}
                       <button type="button" className="story-editor-button story-image-generate"
-                        disabled={Boolean(imageJob) || !step.imageDescription?.trim()} onClick={() => handleGenerateImage(step)}>
+                        disabled={Boolean(imageJob) || !step.imageDescription?.trim()}
+                        onClick={() => handleGenerateImage(step.id, { description: step.imageDescription })}>
                         <Sparkles size={16} aria-hidden="true" />
                         {t("Generate illustration with AI")}
                       </button>

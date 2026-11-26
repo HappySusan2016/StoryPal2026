@@ -434,11 +434,14 @@ export default function ParentPortal({ initialProfileId = null, storyEditor = nu
   function handleChildPageConfirmed(pageIndex, completed) {
     const uid = currentUser?.uid;
     if (!uid || auth.currentUser?.uid !== uid || !storyPassport || !existingStory) return;
-    readingSessionRef.current ??= {
-      id: crypto.randomUUID(),
-      childId: storyPassport.id,
-      moduleId: existingStory.id,
-    };
+    const session = readingSessionRef.current;
+    if (session?.childId !== storyPassport.id || session?.moduleId !== existingStory.id) {
+      readingSessionRef.current = {
+        id: crypto.randomUUID(),
+        childId: storyPassport.id,
+        moduleId: existingStory.id,
+      };
+    }
     saveReadingPage(uid, readingSessionRef.current, pageIndex, completed).catch((error) => {
       console.error("Failed to save reading page", error);
       if (auth.currentUser?.uid === uid) setReadingSaveError(true);
@@ -450,7 +453,11 @@ export default function ParentPortal({ initialProfileId = null, storyEditor = nu
     if (!uid || auth.currentUser?.uid !== uid || childId !== storyPassport?.id || moduleId !== existingStory?.id) {
       return Promise.reject(new Error("Reading account changed"));
     }
-    return awardReadingStars(uid, childId, moduleId, stars);
+    const session = readingSessionRef.current;
+    if (session?.childId !== childId || session?.moduleId !== moduleId) {
+      return Promise.reject(new Error("Reading session changed"));
+    }
+    return awardReadingStars(uid, session, stars);
   }
 
   function handleReadAgain() {
@@ -870,6 +877,7 @@ export default function ParentPortal({ initialProfileId = null, storyEditor = nu
         <StoryPlayer
           moduleDefinition={PARENT_TRAINING_MODULE}
           onClose={() => setShowTraining(false)}
+          hideParentGuide
         />
       )}
     </>

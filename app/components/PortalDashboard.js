@@ -327,13 +327,10 @@ export default function PortalDashboard({
               <div>
                 <div className="section-label">{t("PROFILE")}</div>
                 <h1>{profile.childName}</h1>
-                <p>
-                  {profile.age || ""} · {profile.interaction?.interests || ""}
-
-                </p>
+                <p>{profile.age || ""}</p>
               </div>
             </div>
-            <div className="actions">
+            {/* <div className="actions">
               <button
                 className="primary auto"
                 onClick={() => onCreate(profile.id)}
@@ -343,7 +340,7 @@ export default function PortalDashboard({
               <Link className="secondary" href="/child">
                 ▶ {t("Child mode")}
               </Link>
-            </div>
+            </div> */}
           </div>
           <section className="card">
             <SuccessMessage message={savedProfile?.id === profile.id ? t("Changes saved successfully") : null} />

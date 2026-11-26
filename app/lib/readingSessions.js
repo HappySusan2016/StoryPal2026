@@ -1,6 +1,6 @@
 /* Store storybook reading sessions separately under the corresponding child profile. */
 
-import { arrayUnion, collection, doc, onSnapshot, runTransaction, serverTimestamp, setDoc } from "firebase/firestore";
+import { arrayUnion, collection, doc, increment, onSnapshot, runTransaction, serverTimestamp, setDoc } from "firebase/firestore";
 import { db } from "./firebaseClient";
 
 /** Merge confirmed pages atomically so writing the same page twice does not increase the count. */
@@ -31,20 +31,16 @@ export function subscribeToReadingPageCounts(uid, onCounts, onError) {
 
 
 /** Award stars once per storybook. A transaction protects the total against concurrent claims. */
-export function awardReadingStars(uid, childId, moduleId, stars) {
+export function awardReadingStars(uid, { id, childId, moduleId }, stars) {
+  const sessionRef = doc(db, "users", uid, "readingSessions", id);
   const rewardRef = doc(db, "users", uid, "childStars", childId);
   return runTransaction(db, async (transaction) => {
-    const snapshot = await transaction.get(rewardRef);
-    const reward = snapshot.data();
-    const completedModules = reward?.completedModules || {};
-    if (Object.hasOwn(completedModules, moduleId)) return;
+    const snapshot = await transaction.get(sessionRef);
+    if (snapshot.data()?.starsAwarded != null) return;
 
+    transaction.set(sessionRef, { childId, moduleId, starsAwarded: stars }, { merge: true });
     transaction.set(rewardRef, {
-      totalStars: (reward?.totalStars || 0) + stars,
-      completedModules: {
-        ...completedModules,
-        [moduleId]: { completedAt: serverTimestamp(), starsAwarded: stars },
-      },
+      totalStars: increment(stars),
       lastUpdated: serverTimestamp(),
     }, { merge: true });
   });

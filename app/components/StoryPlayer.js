@@ -55,13 +55,14 @@ export default function StoryPlayer({
   readerHeading,
   childMode = false,
   onReadAgain,
+  hideParentGuide = false,
 }) {
   const { t } = useTranslation();
   /** @module Layouts for reading, editor preview, and the dialog */
   const isPreview = layout === "preview";
   const isReader = layout === "reader";
   const isModal = layout === "modal";
-  const showParentGuide = !isPreview;
+  const showParentGuide = !isPreview && !hideParentGuide;
   const [readerTextIndex, setReaderTextIndex] = useState(() => isReader ? loadReaderTextSize() : 0);
   const readerTextSize = READER_TEXT_SIZES[readerTextIndex];
   const title = moduleDefinition?.title || "Story";
@@ -1022,7 +1023,7 @@ export default function StoryPlayer({
             )
           )}
 
-          {isPreview && isValidParentGuide(currentStep?.parentGuide) && (
+          {isPreview && !hideParentGuide && isValidParentGuide(currentStep?.parentGuide) && (
             <aside className="story-preview-guide mb-4">
               <h2>{t("Parent Guide")}</h2>
               <h3 className="font-semibold">{interpolate(currentStep.parentGuide.title)}</h3>
@@ -1035,8 +1036,8 @@ export default function StoryPlayer({
             <div className="px-6 pb-6">
               {currentStep && (
                 <div>
-                  <div className="flex justify-between items-center pt-4 border-t border-zinc-200 lg:hidden">
-                    <div className="flex items-center gap-2">
+                  <div className={`flex justify-between items-center pt-4 border-t border-zinc-200 ${isModal && hideParentGuide ? "lg:justify-end" : "lg:hidden"}`}>
+                    <div className="flex items-center gap-2 lg:hidden">
                       <button type="button" onClick={handlePrint} disabled={isPrinting || !steps.length} aria-label={t("Print")} className="rounded-xl px-3 py-2 text-zinc-700 hover:bg-zinc-100 disabled:opacity-50">
                         <Printer className="w-5 h-5" />
                       </button>
